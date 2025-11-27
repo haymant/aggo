@@ -1,0 +1,51 @@
+# Node + package manager
+node_modules/
+/.pnp/
+
+# pnpm cache (should not be committed)
+.pnpm-store/**
+
+# Vite / TypeScript output
+out/
+dist/
+media/
+webview/dist/
+webview/gen/
+
+# Typescript
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+.history/
+
+# Optional npm/yarn/pnpm files
+package-lock.json
+yarn.lock
+
+# Generated VSIX package
+*.vsix
+
+# Environment
+.env
+.env.*
+
+# Misc
+*.tgz
+*.log
+
+### End of .gitignore
