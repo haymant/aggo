@@ -358,3 +358,59 @@ Debugging tips:
 - `ExperimentalWarning: CommonJS module ... is loading ES Module ...` — this warning appears when Vite (or one of its dependencies) loads ESM from a CommonJS context. It's usually harmless on Node 20 but you can run `node --trace-warnings` to find the exact source if needed.
 
 If you'd like, I can add a small precommit checklist (CI step) that warns about `console.log` usage and other dev-only artifacts to prevent these from being committed again.
+
+---
+
+## 📦 Packaging & Dependencies
+
+When packaging your extension with `vsce package`, you must ensure that runtime dependencies are included in the VSIX, while development dependencies are excluded to keep the package size small.
+
+### The Problem
+- `vsce` by default ignores `node_modules` if you don't specify `dependencies` correctly or if you rely on `devDependencies` for runtime code.
+- Including the entire `node_modules` folder (e.g., via `files: ["node_modules/**"]`) results in a massive VSIX (100MB+) because it includes dev tools like Vite, TypeScript, etc.
+- Missing dependencies cause runtime errors like `Cannot find module 'ajv'` or `Activating extension failed`.
+
+### The Solution: `bundledDependencies`
+Use the `bundledDependencies` field in `package.json` to explicitly list the packages that must be included in the VSIX.
+
+1. **Identify Runtime Dependencies**: List packages used in your extension code (e.g., `ajv`, `jsonc-parser`).
+2. **Update `package.json`**:
+   ```json
+   {
+     "dependencies": {
+       "ajv": "^8.17.1",
+       "jsonc-parser": "^3.0.0"
+     },
+     "bundledDependencies": [
+       "ajv",
+       "jsonc-parser"
+     ],
+     "files": [
+       "out/**",
+       "media/**",
+       "package.json",
+       "node_modules/ajv/**",
+       "node_modules/jsonc-parser/**"
+     ]
+   }
+   ```
+   *Note: Adding `node_modules/pkg/**` to `files` ensures `vsce` picks them up even if it tries to ignore `node_modules` by default.*
+
+3. **Dynamic Loading (Optional but Recommended)**:
+   For heavy dependencies or those that might fail to load, use dynamic `require()` inside a `try/catch` block. This prevents the entire extension from failing to activate if a module is missing.
+
+   ```typescript
+   // src/extension.ts
+   try {
+     const ajv = require('ajv');
+     // use ajv
+   } catch (e) {
+     vscode.window.showErrorMessage('Failed to load validator');
+   }
+   ```
+
+### Verification
+- Run `npm run package` (or `vsce package`).
+- Check the generated `.vsix` size. It should be small (e.g., 1-5MB), not 100MB+.
+- Unzip the `.vsix` (it's a zip file) and check `extension/node_modules` to ensure only the bundled dependencies are present.
+

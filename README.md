@@ -15,6 +15,8 @@ Important features:
 - Files with these extensions are recognized as `json` via `configurationDefaults`.
 - Each file type has a webview-based custom editor entry (placeholder UI).
 - Right-click (Explorer context) supports "Open with Aggo ... Editor" via commands.
+ - Right-click (Editor context) includes "Aggo: Infer Schema from JSON" when an open file's language is `json` or `jsonc`. This infers a schema from the current document, creates a `*.schema` file in the same folder and opens it with the Aggo Schema Editor.
+ - Right-click (Editor context) includes "Aggo: Infer Schema from JSON" and "Aggo: Validate against JSON Schema" when an open file's language is `json` or `jsonc`. The inference command creates a `*.schema` file in the same folder and opens it with the Aggo Schema Editor, while the validation command will prompt you to choose a `.schema` in the workspace and show validation issues in the Problems panel.
 - Placeholder editors are built with React + radix-ui (shadcn/radix-ui style) and show an editor/preview tab.
  - React 19 and Tailwind CSS are used for webview UI (Tailwind processed via Vite/PostCSS), providing a modern dev experience.
 
@@ -176,6 +178,10 @@ pnpm run package
 ```
 
 Add a CI job using Node 20 that runs the packaging step so you can detect packaging issues early.
+
+Bundled runtime dependencies
+---------------------------
+The extension requires `ajv` and `jsonc-parser` at runtime inside the extension host. To keep the VSIX small while ensuring those runtime packages are available, we include them explicitly in the packaged VSIX using `node_modules/<package>/**` globs in the `files` entry of `package.json`. This avoids bundling the entire `node_modules` tree, and keeps the resulting VSIX small.
 
 ## License
 

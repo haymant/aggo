@@ -3,7 +3,7 @@
   "displayName": "Aggo Builder",
   "icon": "media/aggo.png",
   "description": "VS Code extension that builds Aggo Applications with ease.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "lizhao",
   "repository": {
     "type": "git",
@@ -26,8 +26,8 @@
     "watch:webview": "vite --config webview/vite.config.ts",
     "watch": "tsc -w -p ./",
     "package": "vsce package",
-    "package:hoist": "pnpm install --shamefully-hoist && pnpm run build && pnpm run build:webview && pnpm run package",
-    "package:npm": "npm ci && npm run build && npm run build:webview && pnpm run package",
+    "package:hoist": "pnpm install --shamefully-hoist && pnpm run build && pnpm run build:webview && npm run package",
+    "package:npm": "npm ci && npm run build && npm run build:webview && npm run package",
     "pretest": "pnpm run build",
     "test": "node ./out/test/runTest.js"
   },
@@ -50,16 +50,34 @@
     "media/**",
     "package.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "node_modules/ajv/**",
+    "node_modules/fast-deep-equal/**",
+    "node_modules/fast-uri/**",
+    "node_modules/json-schema-traverse/**",
+    "node_modules/require-from-string/**",
+    "node_modules/jsonc-parser/**"
+  ],
+  "assets": [
+    {
+      "path": "node_modules/ajv/**",
+      "addressable": false
+    },
+    {
+      "path": "node_modules/jsonc-parser/**",
+      "addressable": false
+    }
   ],
   "dependencies": {
     "@radix-ui/react-tabs": "^1.0.0",
     "@xyflow/react": "^12.9.3",
-    "jsonjoy-builder": "^0.2.0",
+    "ajv": "8.17.1",
     "jsonc-parser": "^3.0.0",
+    "jsonjoy-builder": "^0.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
+  "bundledDependencies": ["ajv", "jsonc-parser"],
   "contributes": {
     "configurationDefaults": {
       "files.associations": {
@@ -157,6 +175,16 @@
       {
         "command": "aggo.openAggoColorEditor",
         "title": "Open with Aggo Color Editor"
+      },
+      {
+        "command": "aggo.inferSchemaFromJson",
+        "title": "Aggo: Infer Schema from JSON"
+      }
+      ,
+
+      {
+        "command": "aggo.validateAgainstSchema",
+        "title": "Aggo: Validate against JSON Schema"
       }
     ],
     "menus": {
@@ -189,6 +217,31 @@
         {
           "command": "aggo.openAggoColorEditor",
           "when": "resourceExtname == .color",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "aggo.inferSchemaFromJson",
+          "when": "editorLangId == json || editorLangId == jsonc",
+          "group": "navigation"
+        }
+        ,
+          {
+            "command": "aggo.testPing",
+            "when": "editorLangId == json || editorLangId == jsonc",
+            "group": "navigation"
+          }
+          ,
+          {
+            "command": "aggo.testOpenSchema",
+            "when": "editorLangId == json || editorLangId == jsonc",
+            "group": "navigation"
+          }
+          ,
+        {
+          "command": "aggo.validateAgainstSchema",
+          "when": "editorLangId == json || editorLangId == jsonc",
           "group": "navigation"
         }
       ]
