@@ -3,7 +3,8 @@ import * as vscode from 'vscode';
 // import { parseTree, findNodeAtLocation } from 'jsonc-parser';
 import { AggoCustomEditorProvider } from './editors/AggoCustomEditorProvider';
 import { AggoCPNEditorProvider } from './editors/AggoCPNEditorProvider';
-import { AggoActivityViewProvider } from './views/AggoActivityViewProvider';
+import { AggoComponentLibraryProvider } from './views/AggoComponentLibraryProvider';
+import { AggoPropertyViewProvider } from './views/AggoPropertyViewProvider';
 import { parseJsonText, createSchemaFromJson } from './utils/schemaInference';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -30,7 +31,8 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   for (const vt of viewTypes) {
-    const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+    // const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+    const isDev = false; // Force production mode
     let provider: vscode.CustomTextEditorProvider;
     if (vt.viewType === 'aggo.cpnEditor') {
       provider = new AggoCPNEditorProvider(context.extensionUri, vt.title, isDev);
@@ -125,6 +127,19 @@ export function activate(context: vscode.ExtensionContext) {
     console.error('Failed to register command aggo.inferSchemaFromJson', err);
     try { vscode.window.showErrorMessage(`Aggo: failed to register infer schema command: ${err?.message || String(err)}`); } catch (_) { }
   }
+
+  // Register command to insert component from library
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.insertComponent', (data) => {
+    if (AggoCustomEditorProvider.activePanel) {
+      AggoCustomEditorProvider.activePanel.webview.postMessage({ type: 'insertComponent', data });
+    }
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.updateElement', (element) => {
+    if (AggoCustomEditorProvider.activePanel) {
+      AggoCustomEditorProvider.activePanel.webview.postMessage({ type: 'updateElement', element });
+    }
+  }));
 
   // Diagnostics collection for validation results
   const validationDiagnostics = vscode.languages.createDiagnosticCollection('aggoValidation');
@@ -293,15 +308,19 @@ export function activate(context: vscode.ExtensionContext) {
     try { vscode.window.showErrorMessage(`Aggo: failed to register validate schema command: ${err?.message || String(err)}`); } catch (_) { }
   }
 
-  // Register a simple Activity Bar view for a placeholder action
-  const activityProvider = new AggoActivityViewProvider(context.extensionUri);
+  // Register Activity Bar views
+  // Force production mode to ensure we use the built assets from media/
+  const isDev = false; 
+  const libraryProvider = new AggoComponentLibraryProvider(context.extensionUri, isDev);
+  const propertyProvider = new AggoPropertyViewProvider(context.extensionUri, isDev);
   try {
     context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('aggoActivityHello', activityProvider, { webviewOptions: { retainContextWhenHidden: true } })
+      vscode.window.registerWebviewViewProvider(AggoComponentLibraryProvider.viewType, libraryProvider, { webviewOptions: { retainContextWhenHidden: true } }),
+      vscode.window.registerWebviewViewProvider(AggoPropertyViewProvider.viewType, propertyProvider, { webviewOptions: { retainContextWhenHidden: true } })
     );
   } catch (err: any) {
-    console.error('Failed to register Aggo view provider', err);
-    try { vscode.window.showErrorMessage(`Aggo: failed to register activity view: ${err?.message || String(err)}`); } catch (_) { }
+    console.error('Failed to register Aggo view providers', err);
+    try { vscode.window.showErrorMessage(`Aggo: failed to register activity views: ${err?.message || String(err)}`); } catch (_) { }
   }
   
   } catch (err: any) {

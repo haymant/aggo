@@ -12,6 +12,30 @@ This document captures best practices and patterns for building custom editors w
 
 ## 🔁 Handshake & Initialization
 
+### Singleton VS Code API
+
+`acquireVsCodeApi()` can only be called once per webview session. Calling it multiple times throws an error.
+In a React app with multiple components or modules, ensure you wrap the API acquisition in a singleton module to avoid accidental multiple calls (e.g. when importing the API helper from multiple files).
+
+```ts
+// utils/vscode.ts
+declare const acquireVsCodeApi: any;
+
+const getVsCodeApi = () => {
+    if (typeof acquireVsCodeApi === 'undefined') {
+        return { postMessage: () => {}, getState: () => ({}), setState: () => {} }; // Mock for browser dev
+    }
+    if ((window as any)._vscodeApi) { return (window as any)._vscodeApi; }
+    const api = acquireVsCodeApi();
+    (window as any)._vscodeApi = api;
+    return api;
+};
+
+export const vscode = getVsCodeApi();
+```
+
+### Handshake
+
 Use a small handshake so the extension only sends large payloads (e.g. file content) once the webview is ready:
 
 1. Webview: post `ready` once the UI is initialized.
@@ -275,6 +299,69 @@ await vscode.workspace.applyEdit(edit);
 - Dev server: `pnpm run dev:webview` (Vite HMR)
 - Build webview (production): `pnpm run build:webview` and then reload your extension host so it uses `media/webview.js` and `media/index.css`.
 - Useful: `Developer: Toggle Developer Tools` inside the Extension Development Host to inspect the webview's console.
+
+---
+
+## 🧾 Diagnostics & Problems (showing validation errors)
+
+Use VS Code's Diagnostic API to surface validation and linter errors in the Problems pane. The Aggo extension uses a DiagnosticCollection and maps Ajv validation errors into VS Code Diagnostics, which lets users see and navigate issues directly from the editor or the Problems view.
+
+Key ideas:
+- Create a `DiagnosticCollection` for your extension:
+
+```ts
+// extension.ts
+const diagnostics = vscode.languages.createDiagnosticCollection('aggoValidation');
+context.subscriptions.push(diagnostics);
+```
+
+- Convert validation problems into `vscode.Diagnostic`:
+  - Use the error `instancePath` (Ajv) to find a matching node in the JSON text and map it to a `Range`.
+  - If `jsonc-parser` is available, parse the document and locate the node; otherwise fallback to a document-level diagnostic.
+  - Use `vscode.DiagnosticSeverity.Error | Warning | Information` depending on issue severity.
+
+Example mapping (simplified):
+```ts
+import { parseTree, findNodeAtLocation } from 'jsonc-parser';
+
+function mapAjvErrorsToDiagnostics(text: string, ajvErrors: any[]): vscode.Diagnostic[] {
+  const tree = parseTree(text);
+  return (ajvErrors || []).map(err => {
+    const pointer = (err.instancePath || '') as string;
+    const segments = pointer.split('/').slice(1).map(s => (s === '' ? s : (isFinite(Number(s)) ? Number(s) : s)));
+    const node = findNodeAtLocation(tree!, segments as any);
+    const range = node ? new vscode.Range(
+      doc.positionAt(node.offset),
+      doc.positionAt(node.offset + node.length)
+    ) : new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0));
+    const message = `${err.message || 'Schema validation error'} (${err.keyword || ''})`;
+    return new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
+  });
+}
+```
+
+- Set the diagnostics for the document using `diagnostics.set(uri, diagnostics)` and clear them when the document is valid or removed:
+```ts
+// clear diagnostics
+diagnostics.delete(docUri);
+// or set new diagnostics
+diagnostics.set(docUri, diagnosticsArray);
+```
+
+UX & implementation tips:
+- Use `source` on the Diagnostic to identify where the issue came from, e.g., `source: 'aggo'` or `source: 'aggo.validate'`.
+- Provide concise messages and prefer a single diagnostic per issue to avoid overwhelming the Problems pane.
+- Keep validations consistent between the webview and the host. If users select part of the document and only validate selection, offset ranges appropriately when mapping to document positions.
+- Use `DiagnosticRelatedInformation` to point users to the schema file or additional context where necessary.
+- Offer a Quick Fix via a `CodeActionProvider` if you can automatically correct or suggest changes for an error.
+
+Testing & debug:
+- In tests, assert diagnostics programmatically via `vscode.languages.getDiagnostics(uri)` or by checking `DiagnosticCollection` content.
+- In the Extension Development Host, you can show the Problems pane programmatically: `await vscode.commands.executeCommand('workbench.action.problems.focus')`.
+- If your diagnostics rely on `jsonc-parser`, fall back gracefully if the parser isn't available (packaged VSIX sometimes omits dev dependencies you do not bundle).
+
+Be careful to keep the Problems view relevant: clear old or stale diagnostics after updates and limit frequency of diagnostic updates (debounce when validating during user typing).
+
 
 ---
 

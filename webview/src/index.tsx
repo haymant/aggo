@@ -5,7 +5,10 @@ import { parse as parseJsonc } from 'jsonc-parser';
 import 'jsonjoy-builder/styles.css';
 import './styles/index.css';
 
-declare const acquireVsCodeApi: any;
+import { Library } from './views/Library';
+import { Properties } from './views/Properties';
+import { PageCanvas } from './editors/PageCanvas';
+import { vscode } from './utils/vscode';
 
 interface InitMessage {
   type: 'init';
@@ -15,8 +18,6 @@ interface InitMessage {
   text: string;
   theme?: 'light' | 'dark';
 }
-
-const vscode = typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : null;
 
 const App: React.FC = () => {
   const [state, setState] = React.useState<InitMessage | null>(null);
@@ -118,6 +119,18 @@ const App: React.FC = () => {
 
   if (!state) return <div className="aggo-placeholder">Loading...</div>;
 
+  // Route based on viewType
+  if (state.viewType === 'aggo.library') {
+    return <Library />;
+  }
+  if (state.viewType === 'aggo.properties') {
+    return <Properties />;
+  }
+  if (state.viewType === 'aggo.pageEditor') {
+    return <PageCanvas data={schema as any} onChange={handleChange} />;
+  }
+
+  // Default to Schema Editor for other types (schema, cpn, etc.)
   return (
     <TranslationContext value={en}>
       <div className="aggo-root h-screen flex flex-col bg-background text-foreground">

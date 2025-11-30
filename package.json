@@ -3,7 +3,7 @@
   "displayName": "Aggo Builder",
   "icon": "media/aggo.png",
   "description": "VS Code extension that builds Aggo Applications with ease.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "lizhao",
   "repository": {
     "type": "git",
@@ -16,6 +16,16 @@
   "license": "Apache-2.0",
   "categories": [
     "Other"
+  ],
+  "activationEvents": [
+    "onView:aggo.library",
+    "onView:aggo.properties",
+    "onCustomEditor:aggo.pageEditor",
+    "onCustomEditor:aggo.dataSourceEditor",
+    "onCustomEditor:aggo.schemaEditor",
+    "onCustomEditor:aggo.cpnEditor",
+    "onCustomEditor:aggo.mcpEditor",
+    "onCustomEditor:aggo.colorEditor"
   ],
   "main": "out/extension.js",
   "scripts": {
@@ -225,20 +235,7 @@
           "command": "aggo.inferSchemaFromJson",
           "when": "editorLangId == json || editorLangId == jsonc",
           "group": "navigation"
-        }
-        ,
-          {
-            "command": "aggo.testPing",
-            "when": "editorLangId == json || editorLangId == jsonc",
-            "group": "navigation"
-          }
-          ,
-          {
-            "command": "aggo.testOpenSchema",
-            "when": "editorLangId == json || editorLangId == jsonc",
-            "group": "navigation"
-          }
-          ,
+        },
         {
           "command": "aggo.validateAgainstSchema",
           "when": "editorLangId == json || editorLangId == jsonc",
@@ -258,8 +255,15 @@
     "views": {
       "aggoActivity": [
         {
-          "id": "aggoActivityHello",
-          "name": "Aggo Action",
+          "id": "aggo.library",
+          "type": "webview",
+          "name": "Components",
+          "icon": "media/aggo.svg"
+        },
+        {
+          "id": "aggo.properties",
+          "type": "webview",
+          "name": "Details",
           "icon": "media/aggo.svg"
         }
       ]
