@@ -1,6 +1,7 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom/client';
-import * as Tabs from '@radix-ui/react-tabs';
+import { SchemaVisualEditor, TranslationContext, en, JSONSchema } from 'jsonjoy-builder';
+import 'jsonjoy-builder/styles.css';
 import './styles/index.css';
 
 declare const acquireVsCodeApi: any;
@@ -11,46 +12,111 @@ interface InitMessage {
   title: string;
   uri: string;
   text: string;
+  theme?: 'light' | 'dark';
 }
 
 const vscode = typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : null;
 
 const App: React.FC = () => {
   const [state, setState] = React.useState<InitMessage | null>(null);
+  const [schema, setSchema] = React.useState<JSONSchema>({ type: 'object', properties: {}, required: [] });
+  const schemaRef = React.useRef(schema);
+  React.useEffect(() => { schemaRef.current = schema; }, [schema]);
+  const applyingRemoteUpdate = React.useRef(false);
 
   React.useEffect(() => {
-    window.addEventListener('message', (ev: MessageEvent) => {
+    const handler = (ev: MessageEvent) => {
       const data = ev.data as InitMessage;
       if (data?.type === 'init') {
         setState(data);
+        try {
+          if (data.text && data.text.trim() !== '') {
+            const parsed = JSON.parse(data.text);
+            setSchema(parsed);
+          }
+        } catch (e) {
+          console.error("Failed to parse JSON", e);
+        }
+        if (data.theme) {
+          applyTheme(data.theme);
+        }
       }
-    });
+      // Theme-only messages
+      if (ev.data?.type === 'theme') {
+        const t = ev.data?.theme as 'light' | 'dark';
+        applyTheme(t);
+      }
+      // Document updated externally (e.g. saved via text editor or other editor)
+      if (ev.data?.type === 'documentChanged') {
+        try {
+          const text = ev.data?.text as string;
+          if (text && text.trim() !== '') {
+            const parsed = JSON.parse(text);
+            // Avoid unnecessary re-render if schema is unchanged
+            const cur = JSON.stringify(schemaRef.current);
+            const next = JSON.stringify(parsed);
+            if (cur !== next) {
+              applyingRemoteUpdate.current = true;
+              setSchema(parsed);
+              setTimeout(() => { applyingRemoteUpdate.current = false; }, 0);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse incoming document change', e);
+        }
+      }
+    };
+    window.addEventListener('message', handler);
+    
+    // Signal that the webview is ready to receive the init message
+    if (vscode) {
+      vscode.postMessage({ type: 'ready' });
+    }
+
+    return () => window.removeEventListener('message', handler);
   }, []);
 
-  if (!state) return <div className="aggo-placeholder">No data yet. Waiting for editor to initialize...</div>;
+  const applyTheme = (theme: 'light' | 'dark') => {
+    const root = document.getElementById('root');
+    if (!root) return;
+    // Always ensure base .jsonjoy class is present
+    root.classList.add('jsonjoy');
+    if (theme === 'dark') {
+      root.classList.add('dark');
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+    }
+  };
+
+  const handleChange = (newSchema: JSONSchema) => {
+    setSchema(newSchema);
+    if (applyingRemoteUpdate.current) return;
+    if (vscode) {
+      vscode.postMessage({
+        type: 'update',
+        text: JSON.stringify(newSchema, null, 2)
+      });
+    }
+  };
+
+  if (!state) return <div className="aggo-placeholder">Loading...</div>;
 
   return (
-    <div className="aggo-root">
-      <div className="aggo-header">
-        <h2>{state.title}</h2>
-        <div className="aggo-subtitle">{state.uri}</div>
+    <TranslationContext value={en}>
+      <div className="aggo-root h-screen flex flex-col bg-background text-foreground">
+         <div className="flex-1 overflow-auto p-4">
+            <SchemaVisualEditor
+              schema={schema}
+              onChange={handleChange}
+              readOnly={false}
+            />
+         </div>
       </div>
-      <Tabs.Root defaultValue="editor" className="tabs-root">
-        <Tabs.List aria-label="Labels">
-          <Tabs.Trigger value="editor">Editor</Tabs.Trigger>
-          <Tabs.Trigger value="preview">Preview</Tabs.Trigger>
-        </Tabs.List>
-        <Tabs.Content value="editor">
-          <textarea className="editor-text" defaultValue={state.text} />
-        </Tabs.Content>
-        <Tabs.Content value="preview">
-          <pre className="preview">{state.text}</pre>
-        </Tabs.Content>
-      </Tabs.Root>
-      <div className="aggo-footer">
-        <button onClick={() => vscode?.postMessage({ type: 'requestSave' })}>Save (Placeholder)</button>
-      </div>
-    </div>
+    </TranslationContext>
   );
 };
 

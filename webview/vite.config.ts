@@ -4,14 +4,14 @@ import path from 'path';
 
 // Build webview assets to ../media so extension can load them.
 export default defineConfig({
-  root: path.resolve(__dirname, 'src'),
+  root: __dirname,
   plugins: [react()],
   base: '',
   build: {
     outDir: path.resolve(__dirname, '..', 'media'),
     emptyOutDir: false,
     rollupOptions: {
-      input: path.resolve(__dirname, 'src', 'index.html'),
+      input: path.resolve(__dirname, 'index.html'),
       output: {
         entryFileNames: `webview.js`,
         assetFileNames: `[name].[ext]`
@@ -20,6 +20,16 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      credentials: true
+    },
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': '*'
+    }
   }
 });

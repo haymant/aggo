@@ -12,3 +12,28 @@ html, body, #root { height: 100%; }
 .preview{ white-space:pre-wrap; word-wrap: break-word }
 .aggo-footer{ margin-top:8px }
 .aggo-placeholder{ padding:10px; color:#666 }
+
+/* Force dark theme variables to apply even if nested .jsonjoy elements reset them */
+.jsonjoy.dark,
+.jsonjoy.dark .jsonjoy {
+    --jsonjoy-background: #020817;
+    --jsonjoy-foreground: #f8fafc;
+    --jsonjoy-color-foreground: #f8fafc;
+    --jsonjoy-card: #020817;
+    --jsonjoy-card-foreground: #f8fafc;
+    --jsonjoy-popover: #020817;
+    --jsonjoy-popover-foreground: #f8fafc;
+    --jsonjoy-primary: #4ca6ff;
+    --jsonjoy-primary-foreground: #0f172a;
+    --jsonjoy-secondary: #1e293b;
+    --jsonjoy-secondary-foreground: #f8fafc;
+    --jsonjoy-muted: #1e293b;
+    --jsonjoy-muted-foreground: #94a3b8;
+    --jsonjoy-accent: #1e293b;
+    --jsonjoy-accent-foreground: #f8fafc;
+    --jsonjoy-destructive: #7f1d1d;
+    --jsonjoy-destructive-foreground: #f8fafc;
+    --jsonjoy-border: #1e293b;
+    --jsonjoy-input: #1e293b;
+    --jsonjoy-ring: #cbd5e1;
+}

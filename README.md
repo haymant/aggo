@@ -37,7 +37,7 @@ corepack prepare pnpm@latest --activate
 
 
 Prerequisites:
-- Node.js 18+
+- Node.js 20+ (recommended for packaging and running the dev tooling)
 - pnpm (preferred). If not installed, having npm is ok to install pnpm (see above)
 - VS Code with the "Extension Development Host" capability
 
@@ -100,6 +100,38 @@ To package a distributable `.vsix` file, ensure `out` and `media` are built, the
 pnpm run package
 ```
 
+Note: Packaging can fail with `pnpm` because of strict hoisting and some packages which expect a flat node_modules tree (and some packages depend on Node 20+ behavior). If you encounter errors during packaging (missing/invalid package errors, or undici/webidl 'File is not defined') try one of these approaches:
+
+- Recommended (reproducible): use npm and Node 20 for packaging (CI friendly):
+
+```bash
+# Ensure Node 20 is active (nvm):
+nvm install 20 && nvm use 20
+# Clean any pnpm artifacts
+rm -rf node_modules .pnpm pnpm-lock.yaml package-lock.json
+npm ci
+npm run build
+npm run build:webview
+npm run package
+```
+
+- If you prefer pnpm, try a hoisted install and Node 20 to reduce dependency layout issues:
+
+```bash
+nvm install 20 && nvm use 20
+rm -rf node_modules .pnpm pnpm-lock.yaml
+pnpm install --shamefully-hoist --network-concurrency 1
+pnpm run build && pnpm run build:webview
+pnpm run package
+```
+
+Add a CI job using Node 20 that runs the packaging step so you can detect packaging issues early.
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the `LICENSE` file for details.
+```
+
 Note: The `vsce` CLI has been renamed to `@vscode/vsce`. If you see deprecation warnings, ensure `@vscode/vsce` is installed (the package is included in this project as a `devDependency`). The `package` script still runs `vsce package` and the `@vscode/vsce` package provides the `vsce` binary.
 
 If you see warnings about build scripts (pnpm will ask for confirmation), run the command below to approve them interactively (or during CI, add approval via pnpm configuration):
@@ -114,8 +146,22 @@ This requires the `vsce` package (bundled as a dev dependency). The resulting `a
 
 ## Notes & Next steps
 
-- This repository includes placeholder editor UIs only. Implement editor features, serialization, validation, and saving to the underlying TextDocument as needed.
-Use the `webview` folder to extend or replace the React UI; the project uses Vite to build the webview assets (preferred), so `pnpm run dev:webview` runs a local dev server and `pnpm run build:webview` produces the production bundle under `media/`.
+This repository includes several working webview-based editors and building-block editor features, not just placeholders. The work completed so far includes:
+
+- Aggo Schema Editor (first schema editor) — a webview-based schema editor built with `jsonjoy-builder` that:
+	- supports theme detection (Light/Dark/HighContrast) and injects theme classes at first render to avoid FOUC
+	- implements a message handshake (webview -> `ready` and extension -> `init`) to prevent race conditions
+	- implements two-way sync between the webview and the underlying TextDocument. It listens for `workspace.onDidChangeTextDocument` in the extension and forwards `documentChanged` to the webview, while preventing echo loops using a small guard on both sides
+	- demonstrates a Save action using `requestSave`
+- Other editors: Page Editor, Data Source Editor, Color Editor, CPN and MCP editor stubs and placeholders, each registered with VS Code customEditor APIs. They are useful templates to add richer features.
+
+Planned / recommended next steps:
+- Expand editor features (serialization, validation, undo/redo integration) for each editor type.
+- Add tests and CI, including a packaging step using Node 20 and `npm` (recommended) so packaging will be validated on each merge or release.
+- Add a prepublish step that validates that `engines.vscode` and `@types/vscode` are compatible and check for `console.log` in production code.
+- Disable or ban `console.log` in production files via ESLint or a pre-commit/CI rule.
+
+Use the `webview` folder to extend or replace the React UI; the project uses Vite to build the webview assets (preferred). For development, use `pnpm run dev:webview` and `pnpm run watch` for the extension, and press `F5` to open the Extension Development Host.
 
 ### Why Vite (for webview bundling)?
 Vite is fast, supports modern JS and JSX out-of-the-box, provides a development server with HMR for rapid iteration, and has an easy plugin ecosystem for React and Tailwind CSS. For webview development in VS Code, Vite is a strong choice — it keeps the UI iteration fast and integrates well when used with a `dev` mode that you can conditionally load in the extension (like this project does).

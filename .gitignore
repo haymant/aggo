@@ -1,3 +1,6 @@
+tmp
+*.vsix
+
 # Node + package manager
 node_modules/
 /.pnp/

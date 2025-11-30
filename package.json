@@ -1,11 +1,21 @@
 {
-  "name": "aggo-custom-editors",
-  "displayName": "Aggo Custom Editors",
-  "description": "VS Code extension that adds webview-based visual editors for Aggo JSON-based files (*.page, *.ds, *.schema, *.cpn, *.mcp, *.color)",
+  "name": "aggo-builder",
+  "displayName": "Aggo Builder",
+  "description": "VS Code extension that builds Aggo Applications with ease.",
   "version": "0.1.0",
-  "publisher": "your-publisher",
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Other"],
+  "publisher": "lizhao",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/haymant/aggo.git"
+  },
+  "engines": {
+    "node": ">=20",
+    "vscode": "^1.85.0"
+  },
+  "license": "Apache-2.0",
+  "categories": [
+    "Other"
+  ],
   "main": "out/extension.js",
   "scripts": {
     "vscode:prepublish": "pnpm run build && pnpm run build:webview",
@@ -19,29 +29,31 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^22.12.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.0.0",
-    "vite": "^7.2.4",
+    "@types/vscode": "^1.85.0",
     "@vitejs/plugin-react": "^5.1.0",
-    "tailwindcss": "^4.0.0",
-    "postcss": "^8.4.0",
+    "@vscode/vsce": "^3.7.1",
     "autoprefixer": "^10.4.0",
-    "@tailwindcss/postcss": "^4.1.17",
-    "@vscode/vsce": "^3.7.1"
+    "postcss": "^8.4.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^7.2.4"
   },
   "files": [
     "out/**",
     "media/**",
     "package.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
+    "@radix-ui/react-tabs": "^1.0.0",
+    "jsonjoy-builder": "^0.2.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@radix-ui/react-tabs": "^1.0.0"
+    "react-dom": "^19.0.0"
   },
   "contributes": {
     "configurationDefaults": {
@@ -58,47 +70,89 @@
       {
         "viewType": "aggo.pageEditor",
         "displayName": "Aggo Page Editor",
-        "selector": [{ "filenamePattern": "*.page" }],
+        "selector": [
+          {
+            "filenamePattern": "*.page"
+          }
+        ],
         "priority": "option"
       },
       {
         "viewType": "aggo.dataSourceEditor",
         "displayName": "Aggo DataSource Editor",
-        "selector": [{ "filenamePattern": "*.ds" }],
+        "selector": [
+          {
+            "filenamePattern": "*.ds"
+          }
+        ],
         "priority": "option"
       },
       {
         "viewType": "aggo.schemaEditor",
         "displayName": "Aggo Schema Editor",
-        "selector": [{ "filenamePattern": "*.schema" }],
+        "selector": [
+          {
+            "filenamePattern": "*.schema"
+          }
+        ],
         "priority": "option"
       },
       {
         "viewType": "aggo.cpnEditor",
         "displayName": "Aggo CPN Editor",
-        "selector": [{ "filenamePattern": "*.cpn" }],
+        "selector": [
+          {
+            "filenamePattern": "*.cpn"
+          }
+        ],
         "priority": "option"
       },
       {
         "viewType": "aggo.mcpEditor",
         "displayName": "Aggo MCP Editor",
-        "selector": [{ "filenamePattern": "*.mcp" }],
+        "selector": [
+          {
+            "filenamePattern": "*.mcp"
+          }
+        ],
         "priority": "option"
       },
       {
         "viewType": "aggo.colorEditor",
         "displayName": "Aggo Color Editor",
-        "selector": [{ "filenamePattern": "*.color" }],
+        "selector": [
+          {
+            "filenamePattern": "*.color"
+          }
+        ],
         "priority": "option"
       }
     ],
     "commands": [
-      { "command": "aggo.openAggoPageEditor", "title": "Open with Aggo Page Editor" },
-      { "command": "aggo.openAggoDataSourceEditor", "title": "Open with Aggo DataSource Editor" },
-      { "command": "aggo.openAggoSchemaEditor", "title": "Open with Aggo Schema Editor" },
-      { "command": "aggo.openAggoCPNEditor", "title": "Open with Aggo CPN Editor" },
-      { "command": "aggo.openAggoMCPEditor", "title": "Open with Aggo MCP Editor" },
-      { "command": "aggo.openAggoColorEditor", "title": "Open with Aggo Color Editor" }
+      {
+        "command": "aggo.openAggoPageEditor",
+        "title": "Open with Aggo Page Editor"
+      },
+      {
+        "command": "aggo.openAggoDataSourceEditor",
+        "title": "Open with Aggo DataSource Editor"
+      },
+      {
+        "command": "aggo.openAggoSchemaEditor",
+        "title": "Open with Aggo Schema Editor"
+      },
+      {
+        "command": "aggo.openAggoCPNEditor",
+        "title": "Open with Aggo CPN Editor"
+      },
+      {
+        "command": "aggo.openAggoMCPEditor",
+        "title": "Open with Aggo MCP Editor"
+      },
+      {
+        "command": "aggo.openAggoColorEditor",
+        "title": "Open with Aggo Color Editor"
+      }
     ],
     "menus": {
       "explorer/context": [
