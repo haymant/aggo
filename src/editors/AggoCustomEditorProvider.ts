@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { getDevServer } from '../utils/devServer';
 
 export class AggoCustomEditorProvider implements vscode.CustomTextEditorProvider {
   private viewType: string;
@@ -13,7 +14,8 @@ export class AggoCustomEditorProvider implements vscode.CustomTextEditorProvider
 
   public async resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel, _token: vscode.CancellationToken): Promise<void> {
     webviewPanel.webview.options = {
-      enableScripts: true
+      enableScripts: true,
+      localResourceRoots: [this.extensionUri]
     };
 
     const html = this.getHtmlForWebview(webviewPanel.webview, document.uri, this.viewType, this.title);
@@ -30,6 +32,9 @@ export class AggoCustomEditorProvider implements vscode.CustomTextEditorProvider
 
     // Keep track of last text the extension wrote so we can avoid echoing it back
     let lastWrittenText: string | undefined;
+    // Debounce applying updates from the webview to avoid frequent WorkspaceEdit writes
+    let updateTimer: NodeJS.Timeout | undefined;
+    let pendingUpdateText: string | undefined;
 
     webviewPanel.webview.onDidReceiveMessage(async (msg: any) => {
       switch (msg.type) {
@@ -45,14 +50,24 @@ export class AggoCustomEditorProvider implements vscode.CustomTextEditorProvider
         case 'update': {
           // Avoid writing the document if content is identical
           try {
-            const current = document.getText();
-            if (current === msg.text) break;
-            const edit = new vscode.WorkspaceEdit();
-            const lastLine = Math.max(0, document.lineCount - 1);
-            const endPos = document.lineAt(lastLine).range.end;
-            edit.replace(document.uri, new vscode.Range(new vscode.Position(0, 0), endPos), msg.text);
-            lastWrittenText = msg.text;
-            await vscode.workspace.applyEdit(edit);
+            pendingUpdateText = msg.text;
+            if (updateTimer) clearTimeout(updateTimer);
+            updateTimer = setTimeout(async () => {
+              try {
+                const current = document.getText();
+                if (current === pendingUpdateText) { pendingUpdateText = undefined; updateTimer = undefined; return; }
+                const edit = new vscode.WorkspaceEdit();
+                const lastLine = Math.max(0, document.lineCount - 1);
+                const endPos = document.lineAt(lastLine).range.end;
+                edit.replace(document.uri, new vscode.Range(new vscode.Position(0, 0), endPos), pendingUpdateText || '');
+                lastWrittenText = pendingUpdateText;
+                await vscode.workspace.applyEdit(edit);
+                pendingUpdateText = undefined;
+                updateTimer = undefined;
+              } catch (err) {
+                console.warn('Failed applying update from webview:', err);
+              }
+            }, 200);
           } catch (err) {
             console.warn('Failed applying update from webview:', err);
           }
@@ -92,41 +107,56 @@ export class AggoCustomEditorProvider implements vscode.CustomTextEditorProvider
         }
       }
     });
-    webviewPanel.onDidDispose(() => docChangeWatcher.dispose());
+    webviewPanel.onDidDispose(() => { docChangeWatcher.dispose(); if (updateTimer) clearTimeout(updateTimer); });
   }
 
   private getHtmlForWebview(webview: vscode.Webview, resource: vscode.Uri, viewType: string, title: string) {
     let scriptUri: vscode.Uri | string;
     let styleUri: vscode.Uri | string | undefined;
+    let mainCssUri: vscode.Uri | string | undefined;
     
     // Use the Vite dev server when the extension is running in development mode.
     const useDevServer = this.isDev;
+    const devServer = getDevServer();
 
     if (useDevServer) {
-      // Vite dev server
-      scriptUri = 'http://localhost:5173/src/index.tsx';
-      styleUri = 'http://localhost:5173/src/styles/index.css';
+      // Vite dev server, allow overriding host/port via VITE_DEV_SERVER_URL
+      scriptUri = `${devServer.httpUrl}/src/index.tsx`;
+      styleUri = `${devServer.httpUrl}/src/styles/index.css`;
     } else {
       const scriptPathOnDisk = vscode.Uri.joinPath(this.extensionUri, 'media', 'webview.js');
       scriptUri = webview.asWebviewUri(scriptPathOnDisk);
-      const cssPathOnDisk = vscode.Uri.joinPath(this.extensionUri, 'media', 'index.css');
-      styleUri = webview.asWebviewUri(cssPathOnDisk);
+        const cssPathOnDisk = vscode.Uri.joinPath(this.extensionUri, 'media', 'index.css');
+        const mainCssPathOnDisk = vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css');
+        mainCssUri = webview.asWebviewUri(mainCssPathOnDisk);
+        styleUri = webview.asWebviewUri(cssPathOnDisk);
     }
 
     const nonce = getNonce();
     const initialTheme = (vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast) ? 'dark' : 'light';
     
+    const viteClientUri = useDevServer ? `${devServer.httpUrl}/@vite/client` : '';
     return `<!doctype html>
       <html lang="en" class="${initialTheme}">
         <head>
           <meta charset="utf-8" />
-          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' ${useDevServer ? 'http://localhost:5173' : webview.cspSource}; style-src ${useDevServer ? 'http://localhost:5173' : webview.cspSource} 'unsafe-inline'; connect-src ${useDevServer ? 'ws://localhost:5173' : webview.cspSource}; img-src ${webview.cspSource} https: data:;" />
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${useDevServer ? `script-src ${devServer.httpUrl} 'unsafe-inline'; style-src ${devServer.httpUrl} 'unsafe-inline'; connect-src ${devServer.httpUrl} ${devServer.wsUrl};` : `script-src 'nonce-${nonce}' ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; connect-src ${webview.cspSource};`} img-src ${webview.cspSource} https: data:;" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           ${styleUri ? `<link rel="stylesheet" href="${styleUri}">` : ''}
+          ${mainCssUri ? `<link rel="stylesheet" href="${mainCssUri}">` : ''}
           <title>${title}</title>
         </head>
         <body class="${initialTheme}">
           <div id="root" class="jsonjoy ${initialTheme}"></div>
+          ${useDevServer ? `
+          <script nonce="${nonce}" type="module">
+            import { injectIntoGlobalHook } from "${devServer.httpUrl}/@react-refresh";
+            injectIntoGlobalHook(window);
+            window.$RefreshReg$ = () => {};
+            window.$RefreshSig$ = () => (type) => type;
+          </script>
+          <script nonce="${nonce}" type="module" src="${viteClientUri}"></script>
+          ` : ''}
           <script nonce="${nonce}" src="${scriptUri}" type="module"></script>
         </body>
       </html>`;

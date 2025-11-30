@@ -178,6 +178,11 @@ webview.onDidReceiveMessage(async (msg) => {
 });
 ```
 
+Debouncing frequent updates (dragging, continuous changes)
+- When the webview produces frequent `update` messages (e.g. during a node drag), instead of writing to the document for each event, debounce reception and apply a consolidated change. This reduces CPU usage and avoids unnecessarily large undo stacks.
+- Example: store a `pendingUpdateText` and setTimeout for ~200ms. Each new update resets the timer; when the timer fires, apply the final `pendingUpdateText` to the document and set `lastWrittenText` to avoid echo loops.
+ - Additionally, coalesce outgoing messages from the webview. Debounce `postMessage({type: 'update'})` calls (e.g., 150ms) so the extension receives fewer messages while the user interacts.
+
 ### Two-way change synchronization (avoid loops)
 
 When the webview updates the document, the extension writes those changes to the TextDocument. The TextDocument's change events will then trigger notifications to all open editors (including the webview). This can create a loop if not handled carefully.
@@ -201,6 +206,23 @@ if (ev.document.uri === document.uri) {
   webview.postMessage({ type: 'documentChanged', text: ev.document.getText() });
 }
 ```
+
+### CPN editor example
+- The CPN webview uses a simple JSON format with top-level `nodes` and `edges` arrays. Example:
+
+```json
+{
+  "nodes": [
+    { "id": "1", "position": { "x": 100, "y": 100 }, "data": { "label": "Node 1" } }
+  ],
+  "edges": [
+    { "id": "e1-2", "source": "1", "target": "2" }
+  ]
+}
+```
+
+- On the webview side, use `onNodesChange`, `onEdgesChange`, `onNodeDragStop` to update internal state and `vscode.postMessage({ type: 'update', text: JSON.stringify({ nodes, edges }) })` to persist to the extension.
+- On the extension side, listen for `update` messages, apply a `WorkspaceEdit` to replace the document content, and set `lastWrittenText` to the text you just wrote so `onDidChangeTextDocument` ignores that next event.
 
 ---
 
@@ -270,5 +292,69 @@ await vscode.workspace.applyEdit(edit);
 - Webview CSP, nonces, and asset loading: https://code.visualstudio.com/api/extension-guides/webview
 
 ---
+
+## ⚠️ Common Issues
+
+Below are a few common errors you may see during development with the Vite dev server and their fixes.
+
+- "Refused to connect to 'ws://localhost:5173/' because it violates the following Content Security Policy directive: 'connect-src http://localhost:5173'"
+  - Cause: The Vite dev server's HMR uses WebSocket (ws://) and the webview CSP only allowed http. The browser refuses to open the socket and Vite's HMR client cannot connect.
+  - Fix: In dev mode, add both the dev server's http host and ws scheme to the connect-src directive. Example:
+    ```html
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'nonce-<nonce>' http://localhost:5173 'unsafe-inline'; style-src http://localhost:5173 'unsafe-inline'; connect-src http://localhost:5173 ws://localhost:5173; img-src vscode-resource: https: data:;" />
+    ```
+  - Note: Replace `http://localhost:5173` with your dev server host/port if different.
+
+- "Uncaught Error: @vitejs/plugin-react can't detect preamble. Something is wrong."
+  - Cause: This usually happens when a Vite dev bundle is expected but the HTML includes inline scripts that conflict with the module system, or the Vite dev client didn't inject the expected preamble. It's often caused by either blocking HMR (CSP) or mixing inline React code with module loads.
+  - Fix:
+    1. Ensure you only use the module script that Vite serves (e.g. `<script type="module" src="http://localhost:5173/src/index.tsx"></script>`) and avoid embedding inline React code in your webview HTML. Let the module script manage rendering and message handling.
+    2. Confirm CSP allows both `http://localhost:5173` and `ws://localhost:5173` for script- and connect-src (HMR uses websockets).
+    3. If you still see this error, verify the dev server is running and request to `http://localhost:5173` from a browser tab to ensure the server responds correctly.
+    4. Ensure the extension is running in Dev mode (press `F5` to launch the Extension Development Host) while loading the dev webview assets. If the extension is running in production mode (e.g., installed from a VSIX), the provider will generate a production CSP using a `nonce` and inline dev preamble will be blocked. Only use the Vite dev server when running the extension inside the Extension Development Host.
+
+- "React style (Tailwind/CSS) not applied in the webview"
+  - Cause: The webview's dev HTML points to a missing or incorrect CSS file (404), or the component doesn't import the correct app-level styles. Another cause is using the wrong CSS path for the CPN bundle (e.g. `src/cpn/index.css` that doesn't exist) instead of the shared `src/styles/index.css`.
+  - Fix:
+    1. Ensure your `index.tsx` imports the application stylesheet (e.g., `import './styles/index.css'`).
+    2. If you're using React Fast Refresh (Vite dev), the Vite dev server injects a small inline module (e.g. with `injectIntoGlobalHook`) that sets up the refresh runtime. This inline script requires either a `nonce`-ed script tag or `script-src 'unsafe-inline'` in your dev CSP. Since the dev server doesn't add nonces, we recommend allowing `'unsafe-inline'` in `script-src` while in dev mode.
+    ## 🔧 Dev server port / '5173 in use' troubleshooting
+
+    If the Vite dev server fails to start with `Error: Port 5173 is already in use`, either stop the process currently using the port or start Vite on a different port and point the extension at it:
+
+    - Find the process using the port (Linux):
+    ```bash
+    ss -ltnp | grep 5173 || lsof -i :5173
+    # then kill the PID if safe
+    kill -9 <PID>
+    ```
+    - Start Vite on a different port (example uses 5174):
+    ```bash
+    pnpm run dev:webview -- --port 5174
+    ```
+    - When you start the extension, tell it where to find the dev server by setting `VITE_DEV_SERVER_URL`:
+    ```bash
+    VITE_DEV_SERVER_URL=http://localhost:5174 pnpm run watch
+    ```
+
+    The extension uses the `VITE_DEV_SERVER_URL` environment variable to find the dev server URL and inject CSP `http` and `ws` sources dynamically, so custom ports are automatically handled if you set this environment variable.
+
+    2. Use the correct dev server CSS path when building the webview HTML. Example: `http://localhost:5173/src/styles/index.css`.
+    3. Library CSS (e.g. React Flow): If your webview uses React Flow or other third-party libraries that have their own CSS files, be sure to import them in the entry module (e.g., `import '@xyflow/react/dist/style.css'`) so Vite extracts and bundles them into a separate CSS (e.g., `media/cpn.css`). Update the editor provider's production HTML to load the correct `media/cpn.css` for the CPN editor.
+    3. For production, include the built CSS using `webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'index.css'))`.
+
+- "Nodes in React Flow are not draggable or do not persist position"
+  - Cause: When using ReactFlow, if you pass `nodes` and `edges` as controlled props you must also provide `onNodesChange` and `onEdgesChange` (or use the `useNodesState` and `useEdgesState` hooks) so the library can update the node/edge positions. If you don't provide handlers and nodes are provided as a controlled prop, the library can't update them.
+  - Fix:
+    1. Use `onNodesChange={(changes) => setNodes(nds => applyNodeChanges(changes, nds))}` (or `useNodesState`) so node drags are applied.
+    2. Use `onNodeDragStop` to persist node position changes back to the host using `vscode.postMessage({ type: 'update', text: JSON.stringify({ nodes, edges }) })`.
+
+Debugging tips:
+- Open `Developer: Toggle Developer Tools` in the Extension Development Host and look for CSP error messages and 404s for CSS or JS.
+- Check for blocked `ws://` messages in the Network console (HMR requires ws to be allowed in CSP).
+- If you changed your HTML injection code, reload the extension host and verify the generated webview HTML contains the expected `meta` CSP tag.
+
+- `ExperimentalWarning: CommonJS module ... is loading ES Module ...` — this warning appears when Vite (or one of its dependencies) loads ESM from a CommonJS context. It's usually harmless on Node 20 but you can run `node --trace-warnings` to find the exact source if needed.
 
 If you'd like, I can add a small precommit checklist (CI step) that warns about `console.log` usage and other dev-only artifacts to prevent these from being committed again.

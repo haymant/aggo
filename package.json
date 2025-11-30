@@ -1,8 +1,9 @@
 {
   "name": "aggo-builder",
   "displayName": "Aggo Builder",
+  "icon": "media/aggo.png",
   "description": "VS Code extension that builds Aggo Applications with ease.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "lizhao",
   "repository": {
     "type": "git",
@@ -25,6 +26,8 @@
     "watch:webview": "vite --config webview/vite.config.ts",
     "watch": "tsc -w -p ./",
     "package": "vsce package",
+    "package:hoist": "pnpm install --shamefully-hoist && pnpm run build && pnpm run build:webview && pnpm run package",
+    "package:npm": "npm ci && npm run build && npm run build:webview && pnpm run package",
     "pretest": "pnpm run build",
     "test": "node ./out/test/runTest.js"
   },
@@ -51,7 +54,9 @@
   ],
   "dependencies": {
     "@radix-ui/react-tabs": "^1.0.0",
+    "@xyflow/react": "^12.9.3",
     "jsonjoy-builder": "^0.2.0",
+    "jsonc-parser": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -185,6 +190,24 @@
           "command": "aggo.openAggoColorEditor",
           "when": "resourceExtname == .color",
           "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aggoActivity",
+          "title": "Aggo",
+          "icon": "media/aggo.svg"
+        }
+      ]
+    },
+    "views": {
+      "aggoActivity": [
+        {
+          "id": "aggoActivityHello",
+          "name": "Aggo Action",
+          "icon": "media/aggo.svg"
         }
       ]
     }

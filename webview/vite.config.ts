@@ -11,16 +11,21 @@ export default defineConfig({
     outDir: path.resolve(__dirname, '..', 'media'),
     emptyOutDir: false,
     rollupOptions: {
-      input: path.resolve(__dirname, 'index.html'),
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        cpn: path.resolve(__dirname, 'cpn.html')
+      },
       output: {
-        entryFileNames: `webview.js`,
+        entryFileNames: `[name].webview.js`,
         assetFileNames: `[name].[ext]`
       }
     }
   },
   server: {
-    port: 5173,
-    strictPort: true,
+    // Port can be overridden via environment variable VITE_DEV_SERVER_PORT or VITE_DEV_SERVER_URL
+    port: Number(process.env.VITE_DEV_SERVER_PORT || (process.env.VITE_DEV_SERVER_URL ? new URL(process.env.VITE_DEV_SERVER_URL).port : undefined)) || 5173,
+    // Allow fallback if port is taken (useful for developer machines where 5173 is occupied)
+    strictPort: Boolean(process.env.VITE_DEV_STRICT_PORT) || false,
     cors: {
       origin: '*',
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

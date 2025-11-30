@@ -1,4 +1,4 @@
-To test quickly, a sample file is included in `samples/example.page` — open this in the Extension Development Host and right-click to open via the Aggo Page Editor.
+To test quickly, example files are included in `examples/` — open these in the Extension Development Host and right-click to open via the respective Aggo editors. For example, try `examples/sample.cpn` to open with the CPN Editor.
 
 # Aggo Custom Editors (VS Code Extension)
 
@@ -57,8 +57,33 @@ pnpm run build:webview
 For rapid UI iteration use the Vite dev server for the webview and a TypeScript watcher in separate terminals:
 
 ```bash
-pnpm run dev:webview # starts the Vite dev server (port 5173)
+pnpm run dev:webview # starts the Vite dev server (default port 5173)
 pnpm run watch       # watch TypeScript extension code
+```
+
+If port 5173 is already in use, you can start the dev server on a different port and tell the extension where to load the dev server from:
+
+1) Start the Vite dev server on another port (e.g. 5174):
+
+```bash
+pnpm run dev:webview -- --port 5174
+```
+
+2) When launching the extension (`pnpm run watch` or F5 from VS Code), let the extension know the dev server URL using `VITE_DEV_SERVER_URL`:
+
+```bash
+VITE_DEV_SERVER_URL=http://localhost:5174 pnpm run watch
+```
+
+This will update webviews to load from `http://localhost:5174` and allow HMR to use `ws://localhost:5174`.
+
+If you'd rather free port 5173, find what is listening on the port and kill the process (Linux):
+
+```bash
+# find pid using 5173 (or use `ss`/`lsof` as available)
+ss -ltnp | grep 5173 || lsof -i :5173
+# kill safely when confident
+kill -9 <PID>
 ```
 
 Or, to run the production webview build and watch the extension only:
@@ -94,10 +119,35 @@ Note: If you don't want to use a dev server, build the webview using `pnpm run b
 
 ## Packaging for distribution
 
-To package a distributable `.vsix` file, ensure `out` and `media` are built, then run:
+To package a distributable `.vsix` file, ensure `out` and `media` are built, then run one of these (recommended):
 
+1) Using npm (recommended - more reproducible):
 ```bash
+# ensure Node 20
+nvm install 20 && nvm use 20
+# remove leftover pnpm artifacts to avoid hoisting conflicts
+rm -rf node_modules .pnpm pnpm-lock.yaml package-lock.json
+npm ci
+npm run build
+npm run build:webview
+npm run package
+```
+
+2) Using pnpm with hoisted node_modules (works around strict pnpm layout):
+```bash
+rm -rf node_modules .pnpm pnpm-lock.yaml package-lock.json
+pnpm install --shamefully-hoist
+pnpm run build
+pnpm run build:webview
 pnpm run package
+```
+
+3) Short helper scripts in this repository:
+```bash
+# Using pnpm but with hoisting
+pnpm run package:hoist
+# Or, run packaging with npm
+pnpm run package:npm
 ```
 
 Note: Packaging can fail with `pnpm` because of strict hoisting and some packages which expect a flat node_modules tree (and some packages depend on Node 20+ behavior). If you encounter errors during packaging (missing/invalid package errors, or undici/webidl 'File is not defined') try one of these approaches:

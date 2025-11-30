@@ -1,6 +1,7 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom/client';
 import { SchemaVisualEditor, TranslationContext, en, JSONSchema } from 'jsonjoy-builder';
+import { parse as parseJsonc } from 'jsonc-parser';
 import 'jsonjoy-builder/styles.css';
 import './styles/index.css';
 
@@ -29,14 +30,14 @@ const App: React.FC = () => {
       const data = ev.data as InitMessage;
       if (data?.type === 'init') {
         setState(data);
-        try {
-          if (data.text && data.text.trim() !== '') {
-            const parsed = JSON.parse(data.text);
-            setSchema(parsed);
+          try {
+            if (data.text && data.text.trim() !== '') {
+              const parsed = tryParseJsonC(data.text);
+              setSchema(parsed);
+            }
+          } catch (e) {
+            console.error("Failed to parse JSONC/JSON", e);
           }
-        } catch (e) {
-          console.error("Failed to parse JSON", e);
-        }
         if (data.theme) {
           applyTheme(data.theme);
         }
@@ -51,7 +52,7 @@ const App: React.FC = () => {
         try {
           const text = ev.data?.text as string;
           if (text && text.trim() !== '') {
-            const parsed = JSON.parse(text);
+            const parsed = tryParseJsonC(text);
             // Avoid unnecessary re-render if schema is unchanged
             const cur = JSON.stringify(schemaRef.current);
             const next = JSON.stringify(parsed);
@@ -75,6 +76,18 @@ const App: React.FC = () => {
 
     return () => window.removeEventListener('message', handler);
   }, []);
+
+    function tryParseJsonC(text: string) {
+      try {
+        return parseJsonc(text as any);
+      } catch (e) {
+        try {
+          return JSON.parse(text);
+        } catch (err) {
+          throw e;
+        }
+      }
+    }
 
   const applyTheme = (theme: 'light' | 'dark') => {
     const root = document.getElementById('root');

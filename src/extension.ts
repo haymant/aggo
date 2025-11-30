@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { AggoCustomEditorProvider } from './editors/AggoCustomEditorProvider';
+import { AggoCPNEditorProvider } from './editors/AggoCPNEditorProvider';
+import { AggoActivityViewProvider } from './views/AggoActivityViewProvider';
 
 export function activate(context: vscode.ExtensionContext) {
   const viewTypes = [
@@ -22,7 +24,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   for (const vt of viewTypes) {
     const isDev = context.extensionMode === vscode.ExtensionMode.Development;
-    const provider = new AggoCustomEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+    let provider: vscode.CustomTextEditorProvider;
+    if (vt.viewType === 'aggo.cpnEditor') {
+      provider = new AggoCPNEditorProvider(context.extensionUri, vt.title, isDev);
+    } else {
+      provider = new AggoCustomEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+    }
     context.subscriptions.push(vscode.window.registerCustomEditorProvider(vt.viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false
@@ -40,6 +47,12 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(disposable);
   }
+
+  // Register a simple Activity Bar view for a placeholder action
+  const activityProvider = new AggoActivityViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('aggoActivityHello', activityProvider, { webviewOptions: { retainContextWhenHidden: true } })
+  );
 }
 
 export function deactivate() { }
