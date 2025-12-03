@@ -64,6 +64,7 @@ const ElementRenderer: React.FC<{
 };
 
 export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
+  console.debug('[PageCanvas] render data:', data);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const mergeElementTree = useCallback((tree: PageElement, updated: PageElement) => {
@@ -119,6 +120,12 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
         },
         children: []
       });
+    }
+  }, [data]);
+  // Log when we initialize the default root
+  useEffect(() => {
+    if (!data || (Array.isArray(data) && data.length === 0) || (typeof data === 'object' && Object.keys(data).length === 0)) {
+      console.debug('[PageCanvas] initializing default root');
     }
   }, [data]);
 
@@ -180,7 +187,20 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
     e.preventDefault();
   };
 
-  if (!data || !data.tagName) return <div>Initializing...</div>;
+  const isPageData = (obj: any) => obj && typeof obj === 'object' && typeof obj.tagName === 'string';
+  if (!data || !isPageData(data)) {
+    // If we have some data but it doesn't look like a Page object, give a helpful message
+    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+      return (
+        <div className="aggo-placeholder" style={{ padding: 16 }}>
+          <div style={{ marginBottom: 8 }}><strong>Document content does not look like a page.</strong></div>
+          <div style={{ marginBottom: 12 }}>The Page canvas expects a root element with a `tagName`. You can either switch to the Editor view to work with raw JSON, or initialize the document as a Page.</div>
+          <button onClick={() => onChange({ id: 'root', tagName: 'div', attributes: {}, styles: { minHeight: '100%', padding: '20px', backgroundColor: '#ffffff' }, children: [] })}>Initialize as Page</button>
+        </div>
+      );
+    }
+    return <div>Initializing...</div>;
+  }
 
   return (
     <div 

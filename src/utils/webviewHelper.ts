@@ -25,13 +25,14 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
 
     const nonce = getNonce();
     const initialTheme = (vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast) ? 'dark' : 'light';
+    const requiresUnsafeEval = ['aggo.schemaEditor', 'aggo.cpnEditor', 'aggo.mcpEditor', 'aggo.colorEditor'].includes(viewType);
     
     const viteClientUri = useDevServer ? `${devServer.httpUrl}/@vite/client` : '';
     return `<!doctype html>
       <html lang="en" class="${initialTheme}">
         <head>
           <meta charset="utf-8" />
-          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${useDevServer ? `script-src ${devServer.httpUrl} 'unsafe-inline'; style-src ${devServer.httpUrl} 'unsafe-inline'; connect-src ${devServer.httpUrl} ${devServer.wsUrl};` : `script-src 'nonce-${nonce}' ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; connect-src ${webview.cspSource};`} img-src ${webview.cspSource} https: data:;" />
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${useDevServer ? `script-src ${devServer.httpUrl} 'unsafe-inline' ${requiresUnsafeEval ? "'unsafe-eval'" : ''}; style-src ${devServer.httpUrl} 'unsafe-inline'; connect-src ${devServer.httpUrl} ${devServer.wsUrl};` : `script-src 'nonce-${nonce}' ${webview.cspSource} ${requiresUnsafeEval ? "'unsafe-eval'" : ''}; style-src ${webview.cspSource} 'unsafe-inline'; connect-src ${webview.cspSource};`} img-src ${webview.cspSource} https: data:;" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           ${styleUri ? `<link rel="stylesheet" href="${styleUri}">` : ''}
           ${mainCssUri ? `<link rel="stylesheet" href="${mainCssUri}">` : ''}
