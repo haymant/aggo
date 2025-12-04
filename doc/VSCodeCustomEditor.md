@@ -76,7 +76,7 @@ Example:
 
 - Detect the active theme with the `onDidChangeActiveColorTheme` listener in the extension and forward theme toggles to the webview.
 - Apply theme classes on the `<html>`, `<body>`, and webview root container elements to avoid FOUC (flash of unstyled content).
-- For third-party libraries that rely on CSS variables (like `jsonjoy-builder`), prefer overriding theme variables in your own global stylesheet so the library picks up the correct values.
+- For third-party libraries that rely on CSS variables (like `aggo-schema-editor`), prefer overriding theme variables in your own global stylesheet so the library picks up the correct values.
 
 Key points:
 - Use the extension host to determine `isDev` and the initial theme, then inject that into the HTML when creating the webview to prevent a flash of the wrong theme.
@@ -201,6 +201,89 @@ webview.onDidReceiveMessage(async (msg) => {
   }
 });
 ```
+
+---
+
+### Open / Save External Schema Files (Webview bridge)
+
+If your editor integrates with a schema editor that references external $ref URIs (file URIs or http/https), implement a light-weight message bridge so the webview can ask the host to fetch or open those files. The message contract below is intentionally minimal and works well with the default `acquireVsCodeApi`-based bridge.
+
+The pattern (use `command` as the primary discriminator — including `type` for backwards compatibility is fine):
+- Webview -> Extension: `{ command: 'openFile', id, path }`
+- Extension -> Webview: `{ command: 'openFileResponse', id, content }` — content may be the raw text or `{ error: '...' }` JSON string
+- Optional: Webview -> Extension: `{ command: 'saveFile', id, path, content }` to ask the host to persist edits
+- Optional: Extension -> Webview: `{ command: 'saveFileResponse', id, success, error? }`
+
+Example extension handling (simplified):
+```ts
+webview.onDidReceiveMessage(async (msg) => {
+  const command = msg.command || msg.type;
+  if (command === 'openFile') {
+    try {
+      let content = '';
+      if (msg.path.startsWith('http://') || msg.path.startsWith('https://')) {
+        const resp = await fetch(msg.path);
+        content = await resp.text();
+      } else {
+        let uri: vscode.Uri | undefined = msg.path.startsWith('file:') ? vscode.Uri.parse(msg.path) : undefined;
+        if (!uri) {
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+          if (workspaceRoot) uri = vscode.Uri.joinPath(workspaceRoot, msg.path.replace(/^\.\//, ''));
+          else uri = vscode.Uri.file(path.resolve(msg.path));
+        }
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        content = Buffer.from(bytes).toString('utf8');
+      }
+      webview.postMessage({ command: 'openFileResponse', type: 'openFileResponse', id: msg.id, content });
+    } catch (err) {
+      webview.postMessage({ command: 'openFileResponse', type: 'openFileResponse', id: msg.id, content: JSON.stringify({ error: String(err) }) });
+    }
+  } else if (command === 'saveFile') {
+    try {
+      // Resolve uri and write with vscode.workspace.fs.writeFile
+      webview.postMessage({ command: 'saveFileResponse', type: 'saveFileResponse', id: msg.id, success: true });
+    } catch (err) {
+      webview.postMessage({ command: 'saveFileResponse', type: 'saveFileResponse', id: msg.id, success: false, error: String(err) });
+    }
+  }
+});
+```
+
+Client (webview) sample – a lightweight `vscodeOpenFile` bridge is added by default in the webview helper and used by `aggo-schema-editor` if present:
+
+```ts
+// webview/utils/vscode.ts (default bridge)
+const pending = new Map<string, (content?: unknown) => void>();
+window.vscodeOpenFile = function (path) {
+  const id = Math.random().toString(36).slice(2);
+  vscode.postMessage({ command: 'openFile', type: 'openFile', path, id });
+  return new Promise((resolve) => pending.set(id, resolve));
+};
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  const kind = m?.command || m?.type;
+  if (kind === 'openFileResponse' && m.id && pending.has(m.id)) {
+    pending.get(m.id)?.(m.content);
+    pending.delete(m.id);
+  }
+});
+```
+
+Quick notes
+- If your extension prefers to open a host editor tab instead of returning file content, it may do so — but it should still respond with an `openFileResponse` (e.g. `content: null`) so the webview knows the host handled the request.
+- You can respond with parsed objects (e.g. JSON or JSONC) in `openFileResponse.content`. The default bridge forwards whatever you send, so pre-parsing lets you support comments or trailing commas even if the webview bundle lacks a JSONC parser.
+
+> Note: In this repository, open/save handling is centralized via `src/utils/attachFileBridgeHandler.ts` and all custom editors now use dedicated provider classes to ensure consistent behavior.
+
+- Deduplicated providers leveraging the shared handler:
+  - `src/editors/AggoSchemaEditorProvider.ts`
+  - `src/editors/AggoPageEditorProvider.ts`
+  - `src/editors/AggoDataSourceEditorProvider.ts`
+  - `src/editors/AggoMcpEditorProvider.ts`
+  - `src/editors/AggoColorEditorProvider.ts`
+
+Each provider attaches `attachFileBridgeHandler` to implement `openFile/saveFile` reliably (e.g., opening local files in the host and creating temp files for remote http(s) URIs).
+- For saving to remote HTTP endpoints, decide on an auth strategy; the extension or host can implement `saveFile` to support that.
 
 Debouncing frequent updates (dragging, continuous changes)
 - When the webview produces frequent `update` messages (e.g. during a node drag), instead of writing to the document for each event, debounce reception and apply a consolidated change. This reduces CPU usage and avoids unnecessarily large undo stacks.

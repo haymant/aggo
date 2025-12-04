@@ -6,6 +6,14 @@ import path from 'path';
 export default defineConfig({
   root: __dirname,
   plugins: [react()],
+  resolve: {
+    alias: {
+      // Ensure the editor and app use the same React instances to avoid invalid hook calls
+      react: path.resolve(__dirname, '../node_modules/react'),
+      'react-dom': path.resolve(__dirname, '../node_modules/react-dom'),
+      'react-dom/client': path.resolve(__dirname, '../node_modules/react-dom/client')
+    }
+  },
   base: '',
   build: {
     outDir: path.resolve(__dirname, '..', 'media'),

@@ -1,11 +1,16 @@
 import * as vscode from 'vscode';
 // Ajv is loaded lazily in validate command to avoid module load issues during activation
 // import { parseTree, findNodeAtLocation } from 'jsonc-parser';
-import { AggoCustomEditorProvider } from './editors/AggoCustomEditorProvider';
+import { AggoSchemaEditorProvider } from './editors/AggoSchemaEditorProvider';
+import { AggoPageEditorProvider } from './editors/AggoPageEditorProvider';
+import { AggoDataSourceEditorProvider } from './editors/AggoDataSourceEditorProvider';
+import { AggoMcpEditorProvider } from './editors/AggoMcpEditorProvider';
+import { AggoColorEditorProvider } from './editors/AggoColorEditorProvider';
 import { AggoCPNEditorProvider } from './editors/AggoCPNEditorProvider';
 import { AggoComponentLibraryProvider } from './views/AggoComponentLibraryProvider';
 import { AggoPropertyViewProvider } from './views/AggoPropertyViewProvider';
 import { parseJsonText, createSchemaFromJson } from './utils/schemaInference';
+import { getActivePanel } from './utils/activePanel';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -34,10 +39,28 @@ export function activate(context: vscode.ExtensionContext) {
     // const isDev = context.extensionMode === vscode.ExtensionMode.Development;
     const isDev = false; // Force production mode
     let provider: vscode.CustomTextEditorProvider;
-    if (vt.viewType === 'aggo.cpnEditor') {
-      provider = new AggoCPNEditorProvider(context.extensionUri, vt.title, isDev);
-    } else {
-      provider = new AggoCustomEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+    switch (vt.viewType) {
+      case 'aggo.cpnEditor':
+        provider = new AggoCPNEditorProvider(context.extensionUri, vt.title, isDev);
+        break;
+      case 'aggo.schemaEditor':
+        provider = new AggoSchemaEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+        break;
+      case 'aggo.pageEditor':
+        provider = new AggoPageEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+        break;
+      case 'aggo.dataSourceEditor':
+        provider = new AggoDataSourceEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+        break;
+      case 'aggo.mcpEditor':
+        provider = new AggoMcpEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+        break;
+      case 'aggo.colorEditor':
+        provider = new AggoColorEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+        break;
+      default:
+        // fallback - use AggoSchemaEditorProvider for other view types
+        provider = new AggoSchemaEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
     }
     try {
       context.subscriptions.push(vscode.window.registerCustomEditorProvider(vt.viewType, provider, {
@@ -130,15 +153,17 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to insert component from library
   context.subscriptions.push(vscode.commands.registerCommand('aggo.insertComponent', (data) => {
-    if (AggoCustomEditorProvider.activePanel) {
-      AggoCustomEditorProvider.activePanel.webview.postMessage({ type: 'insertComponent', data });
-    }
+      const active = getActivePanel();
+      if (active) {
+        active.webview.postMessage({ type: 'insertComponent', data });
+      }
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('aggo.updateElement', (element) => {
-    if (AggoCustomEditorProvider.activePanel) {
-      AggoCustomEditorProvider.activePanel.webview.postMessage({ type: 'updateElement', element });
-    }
+      const active = getActivePanel();
+      if (active) {
+        active.webview.postMessage({ type: 'updateElement', element });
+      }
   }));
 
   // Diagnostics collection for validation results
@@ -201,12 +226,12 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       const ajv = new AjvConstructor({ allErrors: true, strict: false });
-      // If the schema explicitly states draft-07, add the meta schema proactively to avoid compile errors
+      // If the schema explicitly states draft-2020-12, add the meta schema proactively to avoid compile errors
       try {
-        if (schemaObj && schemaObj.$schema && String(schemaObj.$schema).includes('draft-07')) {
+        if (schemaObj && schemaObj.$schema && String(schemaObj.$schema).includes('2020-12')) {
           // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const draft07 = require('ajv/dist/refs/json-schema-draft-07.json');
-          ajv.addMetaSchema(draft07);
+          const draft2020 = require('ajv/dist/refs/json-schema-draft-2020-12.json');
+          ajv.addMetaSchema(draft2020);
         }
       } catch (err) {
         // ignore — we'll try to compile and handle missing meta later
@@ -220,7 +245,16 @@ export function activate(context: vscode.ExtensionContext) {
           const msg = String(e?.message || e);
           if (/no schema with key or ref/i.test(msg) || /can't resolve reference/i.test(msg)) {
             try {
-              // Try to add draft-07 meta schema first (commonly used)
+              // Try to add draft-2020-12 meta schema first (preferred)
+              // eslint-disable-next-line @typescript-eslint/no-var-requires
+              const draft2020 = require('ajv/dist/refs/json-schema-draft-2020-12.json');
+              ajv.addMetaSchema(draft2020);
+              vscode.window.showInformationMessage('Added Draft-2020-12 meta schema to AJV for validation.');
+            } catch (importErr) {
+              // cannot load meta schema - continue and rethrow
+            }
+            try {
+              // Fallback to draft-07 if 2020-12 cannot be added
               // eslint-disable-next-line @typescript-eslint/no-var-requires
               const draft07 = require('ajv/dist/refs/json-schema-draft-07.json');
               ajv.addMetaSchema(draft07);

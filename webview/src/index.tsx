@@ -24,6 +24,7 @@ interface InitMessage {
 const App: React.FC = () => {
   const [state, setState] = React.useState<InitMessage | null>(null);
   const [schema, setSchema] = React.useState<any>({ type: 'object', properties: {}, required: [] });
+  const [displaySchema, setDisplaySchema] = React.useState<any>(schema);
   const schemaRef = React.useRef(schema);
   React.useEffect(() => { schemaRef.current = schema; }, [schema]);
   const applyingRemoteUpdate = React.useRef(false);
@@ -91,11 +92,17 @@ const App: React.FC = () => {
     let cancelled = false;
     async function load() {
       try {
-        const mod = await import('jsonjoy-builder');
-        await import('jsonjoy-builder/styles.css');
+        const mod = await import('aggo-schema-editor');
+        // Try to load the editor stylesheet; silence TypeScript if .css typings are not present
+        try {
+          // @ts-ignore: stylesheet import may not have type declarations
+          await import('aggo-schema-editor/styles.css');
+        } catch (err) {
+          // ignore stylesheet load errors
+        }
         if (!cancelled) setBuilderComponents(mod);
       } catch (e: any) {
-        console.error('[aggo] failed to load jsonjoy-builder', e);
+        console.error('[aggo] failed to load aggo-schema-editor', e);
         setBuilderError(String(e));
       }
     }
@@ -131,8 +138,53 @@ const App: React.FC = () => {
     }
   };
 
+  function cloneDeep<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  const shouldPrefix = (ref: string) => {
+    if (!ref) return false;
+    if (ref.startsWith('#')) return false;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(ref)) return false;
+    if (ref.includes('/')) return false;
+    return /\.[a-zA-Z0-9]+$/.test(ref);
+  };
+
+  const normalizeRefsForDisplay = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const out: any = Array.isArray(obj) ? [] : {};
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (k === '$ref' && typeof v === 'string' && shouldPrefix(v)) {
+        out[k] = './' + v;
+      } else {
+        out[k] = normalizeRefsForDisplay(v);
+      }
+    }
+    return out;
+  };
+
+  const revertRefsForSave = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const out: any = Array.isArray(obj) ? [] : {};
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (k === '$ref' && typeof v === 'string') {
+        if (v.startsWith('./') && shouldPrefix(v.slice(2))) {
+          out[k] = v.slice(2);
+        } else {
+          out[k] = v;
+        }
+      } else {
+        out[k] = revertRefsForSave(v);
+      }
+    }
+    return out;
+  };
+
   const handleChange = (newSchema: any) => {
-    setSchema(newSchema);
+    const reverted = revertRefsForSave(newSchema);
+    setSchema(reverted);
     if (applyingRemoteUpdate.current) return;
     if (vscode) {
       vscode.postMessage({
@@ -141,6 +193,65 @@ const App: React.FC = () => {
       });
     }
   };
+
+  React.useEffect(() => {
+    try {
+      const cloned = cloneDeep(schema);
+      const norm = normalizeRefsForDisplay(cloned);
+      setDisplaySchema(norm);
+    } catch (e) {
+      setDisplaySchema(schema);
+    }
+  }, [schema]);
+
+  const handleOpenInHost = React.useCallback(async (path: string) => {
+    console.log('[aggo webview] handleOpenInHost called with path:', path);
+    const anyWindow = window as any;
+    if (typeof anyWindow?.vscodeOpenFile === 'function') {
+      try {
+        console.log('[aggo webview] calling vscodeOpenFile...');
+        const result = await anyWindow.vscodeOpenFile(path);
+        console.log('[aggo webview] vscodeOpenFile result type:', typeof result, result === null ? 'null' : result === undefined ? 'undefined' : '');
+        // If the host already parsed it, return as-is; otherwise parse string response
+        if (typeof result === 'string') {
+          console.log('[aggo webview] result is string, length:', result.length);
+          try {
+            const parsed = tryParseJsonC(result);
+            console.log('[aggo webview] parsed string result, type:', typeof parsed);
+            return parsed;
+          } catch (_e) {
+            console.log('[aggo webview] failed to parse string, returning raw');
+            return result;
+          }
+        }
+        if (result && typeof result === 'object') {
+          console.log('[aggo webview] result is object with keys:', Object.keys(result).slice(0, 5));
+        }
+        return result;
+      } catch (err) {
+        console.error('[aggo webview] vscodeOpenFile failed', err);
+      }
+    } else {
+      console.log('[aggo webview] vscodeOpenFile not available');
+    }
+    if (/^https?:\/\//i.test(path)) {
+      try {
+        const resp = await fetch(path);
+        if (resp.ok) {
+          const text = await resp.text();
+          try {
+            return tryParseJsonC(text);
+          } catch (_e) {
+            return text;
+          }
+        }
+      } catch (err) {
+        console.error('[aggo webview] fallback fetch failed', err);
+      }
+    }
+    console.log('[aggo webview] handleOpenInHost returning undefined');
+    return undefined;
+  }, []);
 
   if (!state) return <div className="aggo-placeholder">Loading...</div>;
 
@@ -152,7 +263,7 @@ const App: React.FC = () => {
     return <Properties />;
   }
   if (state.viewType === 'aggo.pageEditor') {
-    // Page editor doesn't require jsonjoy-builder so it stays lightweight
+    // Page editor doesn't require aggo-schema-editor so it stays lightweight
     return <PageCanvas data={schema as any} onChange={handleChange} />;
   }
 
@@ -175,6 +286,7 @@ const App: React.FC = () => {
                   schema={schema}
                   onChange={handleChange}
                   readOnly={false}
+                  onOpenInHost={handleOpenInHost}
                 />
               </ErrorBoundary>
            </div>

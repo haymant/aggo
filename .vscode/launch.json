@@ -11,11 +11,33 @@
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
       "internalConsoleOptions": "neverOpen"
     }
+    ,
+    {
+      "name": "Launch Webview (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/webview",
+      "preLaunchTask": "Dev: Webview (Vite)",
+      "runtimeArgs": ["--remote-debugging-port=9222"]
+    },
+    {
+      "name": "Attach to Extension Host",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true
+    }
   ],
   "compounds": [
     {
       "name": "Run: Extension + Servers",
       "configurations": ["Run Extension"]
+    }
+    ,
+    {
+      "name": "Debug: Extension + Webview",
+      "configurations": ["Run Extension", "Launch Webview (Chrome)"]
     }
   ]
 }

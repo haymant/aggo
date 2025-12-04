@@ -204,7 +204,7 @@ This requires the `vsce` package (bundled as a dev dependency). The resulting `a
 
 This repository includes several working webview-based editors and building-block editor features, not just placeholders. The work completed so far includes:
 
-- Aggo Schema Editor (first schema editor) — a webview-based schema editor built with `jsonjoy-builder` that:
+- Aggo Schema Editor (first schema editor) — a webview-based schema editor built with `aggo-schema-editor` that:
 	- supports theme detection (Light/Dark/HighContrast) and injects theme classes at first render to avoid FOUC
 	- implements a message handshake (webview -> `ready` and extension -> `init`) to prevent race conditions
 	- implements two-way sync between the webview and the underlying TextDocument. It listens for `workspace.onDidChangeTextDocument` in the extension and forwards `documentChanged` to the webview, while preventing echo loops using a small guard on both sides
