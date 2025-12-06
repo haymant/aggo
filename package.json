@@ -81,13 +81,17 @@
   "dependencies": {
     "@radix-ui/react-tabs": "^1.0.0",
     "@xyflow/react": "^12.9.3",
+    "aggo-schema-editor": "^0.2.4",
     "ajv": "8.17.1",
     "jsonc-parser": "^3.0.0",
-    "aggo-schema-editor": "^0.2.4",
+    "lucide-react": "^0.556.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "bundledDependencies": ["ajv", "jsonc-parser"],
+  "bundledDependencies": [
+    "ajv",
+    "jsonc-parser"
+  ],
   "contributes": {
     "configurationDefaults": {
       "files.associations": {
@@ -189,9 +193,7 @@
       {
         "command": "aggo.inferSchemaFromJson",
         "title": "Aggo: Infer Schema from JSON"
-      }
-      ,
-
+      },
       {
         "command": "aggo.validateAgainstSchema",
         "title": "Aggo: Validate against JSON Schema"

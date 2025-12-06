@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import { getDevServer } from '../utils/devServer';
 import { setActivePanel } from '../utils/activePanel';
 import { normalizeBridgeContent } from '../utils/fileBridge';
+import { AggoPropertyViewProvider } from '../views/AggoPropertyViewProvider';
 
 export class AggoCPNEditorProvider implements vscode.CustomTextEditorProvider {
   private isDev: boolean;
@@ -142,6 +143,10 @@ export class AggoCPNEditorProvider implements vscode.CustomTextEditorProvider {
           try { await document.save(); } catch (e) { console.warn('Failed to save', e); }
           break;
         }
+        case 'selectionChanged': {
+          AggoPropertyViewProvider.postMessageToWebview({ type: 'selectionChanged', element: msg.element });
+          break;
+        }
         case 'update': {
           try {
               // Coalesce frequent updates (e.g. during drag) into a single WorkspaceEdit
@@ -208,17 +213,18 @@ export class AggoCPNEditorProvider implements vscode.CustomTextEditorProvider {
 
   private getHtmlForWebview(webview: vscode.Webview) {
     const nonce = this.getNonce();
+    const initialTheme = (vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast) ? 'dark' : 'light';
     // Use dev server when in development; otherwise load packaged assets from `media/cpn.webview.js` that Vite builds
     const useDevServer = this.isDev;
     const devServer = getDevServer();
     const scriptSource = useDevServer ? devServer.httpUrl : webview.cspSource;
     // Dev server path for cpn uses the same app CSS (styles/index.css) as other webviews.
     const scriptUri = useDevServer ? `${devServer.httpUrl}/src/cpn/index.tsx` : webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'cpn.webview.js'));
-    const styleUri = useDevServer ? `${devServer.httpUrl}/src/styles/index.css` : webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'cpn.css'));
-    const mainCssUri = useDevServer ? `${devServer.httpUrl}/src/styles/index.css` : webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
+    const styleUri = useDevServer ? `${devServer.httpUrl}/src/cpn/index.tsx` : webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'cpn.css'));
+    const mainCssUri = useDevServer ? `${devServer.httpUrl}/src/styles/index.css` : webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'index.css'));
     const viteClientUri = useDevServer ? `${devServer.httpUrl}/@vite/client` : '';
     return `<!doctype html>
-      <html lang="en">
+      <html lang="en" class="${initialTheme}">
         <head>
           <meta charset="utf-8" />
           <meta http-equiv="Content-Security-Policy"
@@ -231,7 +237,7 @@ export class AggoCPNEditorProvider implements vscode.CustomTextEditorProvider {
             .aggo-root{height:100%;}
           </style>
         </head>
-        <body>
+        <body class="${initialTheme}">
           <div id="root" class="aggo-root"></div>
           ${useDevServer ? `
           <script nonce="${nonce}" type="module">

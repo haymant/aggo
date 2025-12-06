@@ -1,16 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { vscode } from '../utils/vscode';
+import React, { useState, useEffect } from "react";
+import { vscode } from "../utils/vscode";
 
 type ElementData = {
   id: string;
-  tagName: string;
-  attributes: Record<string, string>;
-  styles: Record<string, string>;
+  tagName?: string;
+  attributes?: Record<string, string>;
+  styles?: Record<string, string>;
   content?: string;
+  // CPN specific
+  type?: string;
+  data?: any;
+  isEdge?: boolean;
 };
 
 const SpaceSVG: React.FC<{ styles: Record<string, string>; onEdit: (prop: string, val: string) => void }> = ({ styles, onEdit }) => {
-  const getValue = (val?: string) => (!val || val === '0' || val === '0px') ? '0' : val.replace('px', '');
+  const getValue = (val?: string) => (!val || val === "0" || val === "0px") ? "0" : val.replace("px", "");
   
   const mt = getValue(styles.marginTop);
   const mr = getValue(styles.marginRight);
@@ -20,13 +24,6 @@ const SpaceSVG: React.FC<{ styles: Record<string, string>; onEdit: (prop: string
   const pr = getValue(styles.paddingRight);
   const pb = getValue(styles.paddingBottom);
   const pl = getValue(styles.paddingLeft);
-
-  const promptEdit = (prop: string, current: string) => {
-    // In a real app, this might be a popover. For now, simple prompt or just focus an input.
-    // We'll just use a simple prompt for this MVP to avoid complex UI code without libraries.
-    // Or better, we rely on the inputs below the SVG.
-    // Let's just make it clickable to focus the input if we had refs, but for now just visual.
-  };
 
   return (
     <div className="flex justify-center p-4 select-none">
@@ -55,32 +52,193 @@ const SpaceSVG: React.FC<{ styles: Record<string, string>; onEdit: (prop: string
   );
 };
 
+const CPNProperties: React.FC<{ element: ElementData; onUpdate: (data: ElementData) => void }> = ({ element, onUpdate }) => {
+  const [activeTab, setActiveTab] = useState("props");
+  const data = element.data || {};
+
+  const updateData = (key: string, value: any) => {
+    const newData = { ...data, [key]: value };
+    onUpdate({ ...element, data: newData });
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex border-b border-border">
+        <button
+          className={`px-4 py-2 text-xs font-medium ${activeTab === "props" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("props")}
+        >
+          Properties
+        </button>
+        {element.type === "place" && (
+          <button
+            className={`px-4 py-2 text-xs font-medium ${activeTab === "tokens" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setActiveTab("tokens")}
+          >
+            Tokens
+          </button>
+        )}
+        <button
+          className={`px-4 py-2 text-xs font-medium ${activeTab === "sim" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("sim")}
+        >
+          Simulation
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {activeTab === "props" && (
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Name</label>
+              <input
+                type="text"
+                className="w-full p-1 text-xs bg-background border border-input rounded"
+                value={data.name || ""}
+                onChange={(e) => updateData("name", e.target.value)}
+              />
+            </div>
+            
+            {element.type === "transition" && (
+              <>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Kind</label>
+                  <select
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={data.kind || "Manual"}
+                    onChange={(e) => updateData("kind", e.target.value)}
+                  >
+                    <option value="Manual">Manual</option>
+                    <option value="Auto">Auto</option>
+                    <option value="Message">Message</option>
+                    <option value="LLM">LLM</option>
+                    <option value="Tools">Tools</option>
+                    <option value="Retriever">Retriever</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Guard Expression</label>
+                  <textarea
+                    className="w-full p-1 text-xs bg-background border border-input rounded h-20 font-mono"
+                    value={data.guardExpression || ""}
+                    onChange={(e) => updateData("guardExpression", e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {element.type === "place" && (
+               <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Capacity</label>
+                  <input
+                    type="number"
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={data.capacity || 0}
+                    onChange={(e) => updateData("capacity", parseInt(e.target.value))}
+                  />
+                </div>
+            )}
+
+            {element.isEdge && (
+               <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Expression</label>
+                  <input
+                    type="text"
+                    className="w-full p-1 text-xs bg-background border border-input rounded font-mono"
+                    value={data.expression || ""}
+                    onChange={(e) => updateData("expression", e.target.value)}
+                  />
+                </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "tokens" && element.type === "place" && (
+          <div className="space-y-4">
+             <div className="flex justify-between items-center">
+                <h4 className="text-xs font-bold">Initial Tokens</h4>
+                <button 
+                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90"
+                    onClick={() => {
+                        const tokens = data.tokens || [];
+                        updateData("tokens", [...tokens, { color: "#000000" }]);
+                    }}
+                >
+                    Add Token
+                </button>
+             </div>
+             <div className="space-y-2">
+                {(data.tokens || []).map((token: any, idx: number) => (
+                    <div key={idx} className="flex items-center gap-2 border p-2 rounded">
+                        <input 
+                            type="color" 
+                            value={token.color || "#000000"}
+                            onChange={(e) => {
+                                const tokens = [...(data.tokens || [])];
+                                tokens[idx] = { ...tokens[idx], color: e.target.value };
+                                updateData("tokens", tokens);
+                            }}
+                            className="w-6 h-6 border-0 p-0 rounded cursor-pointer"
+                        />
+                        <span className="text-xs flex-1">Token {idx + 1}</span>
+                        <button 
+                            className="text-xs text-destructive hover:text-destructive/80"
+                            onClick={() => {
+                                const tokens = [...(data.tokens || [])];
+                                tokens.splice(idx, 1);
+                                updateData("tokens", tokens);
+                            }}
+                        >
+                            Remove
+                        </button>
+                    </div>
+                ))}
+                {(data.tokens || []).length === 0 && <div className="text-xs text-muted-foreground italic">No tokens</div>}
+             </div>
+          </div>
+        )}
+
+        {activeTab === "sim" && (
+            <div className="space-y-4">
+                <div className="p-2 bg-muted rounded text-xs">
+                    Simulation controls will appear here when the simulation is running.
+                </div>
+                <button className="w-full py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80">
+                    Start Simulation
+                </button>
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const Properties: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'props' | 'styles'>('props');
+  const [activeTab, setActiveTab] = useState<"props" | "styles">("props");
   const [element, setElement] = useState<ElementData | null>(null);
 
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       const msg = ev.data;
-      if (msg.type === 'selectionChanged') {
+      if (msg.type === "selectionChanged") {
         setElement(msg.element);
-      } else if (msg.type === 'update') {
+      } else if (msg.type === "update") {
         // Handle updates from extension if needed
       }
     };
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
   }, []);
 
   const updateElement = (updates: Partial<ElementData>) => {
     if (!element) return;
     const newElement = { ...element, ...updates };
     setElement(newElement);
-    vscode.postMessage({ type: 'updateElement', element: newElement });
+    vscode.postMessage({ type: "updateElement", element: newElement });
   };
 
   const updateStyle = (key: string, value: string) => {
-    if (!element) return;
+    if (!element || !element.styles) return;
     const newStyles = { ...element.styles };
     if (!value) {
       delete newStyles[key];
@@ -91,7 +249,7 @@ export const Properties: React.FC = () => {
   };
 
   const updateAttr = (key: string, value: string) => {
-    if (!element) return;
+    if (!element || !element.attributes) return;
     const newAttrs = { ...element.attributes };
     if (!value) {
       delete newAttrs[key];
@@ -103,208 +261,142 @@ export const Properties: React.FC = () => {
 
   if (!element) {
     return (
-      <div className="p-4 text-center text-muted-foreground text-sm">
-        Select an element on the canvas to edit its properties.
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+        Select an element to view properties
       </div>
     );
   }
 
+  // CPN Element Handling
+  if (element.type === "place" || element.type === "transition" || element.isEdge) {
+      return <CPNProperties element={element} onUpdate={(newData) => {
+          setElement(newData);
+          vscode.postMessage({ type: "updateElement", element: newData });
+      }} />;
+  }
+
+  // HTML Element Handling (Page Editor)
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs */}
       <div className="flex border-b border-border">
         <button
-          className={`flex-1 py-2 text-xs font-medium ${activeTab === 'props' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-          onClick={() => setActiveTab('props')}
+          className={`px-4 py-2 text-xs font-medium ${activeTab === "props" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("props")}
         >
           Properties
         </button>
         <button
-          className={`flex-1 py-2 text-xs font-medium ${activeTab === 'styles' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-          onClick={() => setActiveTab('styles')}
+          className={`px-4 py-2 text-xs font-medium ${activeTab === "styles" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("styles")}
         >
           Styles
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {activeTab === 'props' && (
+      <div className="flex-1 overflow-y-auto p-4">
+        {activeTab === "props" && (
           <div className="space-y-4">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Tag Name</label>
-              <div className="text-sm font-mono p-1 bg-secondary rounded">{element.tagName}</div>
+              <label className="text-xs text-muted-foreground">Tag Name</label>
+              <input
+                type="text"
+                className="w-full p-1 text-xs bg-background border border-input rounded"
+                value={element.tagName || ""}
+                readOnly
+              />
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">ID</label>
+              <input
+                type="text"
+                className="w-full p-1 text-xs bg-background border border-input rounded"
+                value={element.attributes?.id || ""}
+                onChange={(e) => updateAttr("id", e.target.value)}
+              />
             </div>
 
-            {element.content !== undefined && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Content</label>
-                <textarea
-                  className="w-full p-2 text-xs bg-background border border-input rounded focus:outline-none focus:ring-1 focus:ring-ring"
-                  rows={3}
-                  value={element.content}
-                  onChange={(e) => updateElement({ content: e.target.value })}
-                />
-              </div>
-            )}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Classes</label>
+              <input
+                type="text"
+                className="w-full p-1 text-xs bg-background border border-input rounded"
+                value={element.attributes?.class || ""}
+                onChange={(e) => updateAttr("class", e.target.value)}
+              />
+            </div>
 
-            {element.tagName === 'img' && (
-              <>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Source URL</label>
-                  <input
-                    type="text"
-                    className="w-full p-2 text-xs bg-background border border-input rounded focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={element.attributes.src || ''}
-                    onChange={(e) => updateAttr('src', e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Alt Text</label>
-                  <input
-                    type="text"
-                    className="w-full p-2 text-xs bg-background border border-input rounded focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={element.attributes.alt || ''}
-                    onChange={(e) => updateAttr('alt', e.target.value)}
-                  />
-                </div>
-              </>
-            )}
-
-            {element.tagName === 'a' && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Href</label>
-                <input
-                  type="text"
-                  className="w-full p-2 text-xs bg-background border border-input rounded focus:outline-none focus:ring-1 focus:ring-ring"
-                  value={element.attributes.href || ''}
-                  onChange={(e) => updateAttr('href', e.target.value)}
-                />
-              </div>
-            )}
-            
-            {/* Generic Attributes */}
-            <div className="pt-2 border-t border-border">
-               <h4 className="text-xs font-bold mb-2">Attributes</h4>
-               {Object.entries(element.attributes).map(([key, val]) => (
-                 <div key={key} className="grid grid-cols-3 gap-2 mb-2 items-center">
-                   <span className="text-xs text-muted-foreground truncate" title={key}>{key}</span>
-                   <input 
-                      className="col-span-2 p-1 text-xs bg-background border border-input rounded"
-                      value={val}
-                      onChange={(e) => updateAttr(key, e.target.value)}
-                   />
-                 </div>
-               ))}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Content</label>
+              <textarea
+                className="w-full p-1 text-xs bg-background border border-input rounded h-20"
+                value={element.content || ""}
+                onChange={(e) => updateElement({ content: e.target.value })}
+              />
             </div>
           </div>
         )}
 
-        {activeTab === 'styles' && (
-          <div className="space-y-6">
-            {/* Spacing Visualization */}
-            <div>
-              <h4 className="text-xs font-bold mb-2">Spacing</h4>
-              <SpaceSVG styles={element.styles} onEdit={(p, v) => updateStyle(p, v)} />
-              <div className="grid grid-cols-2 gap-2">
-                 {['marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].map(prop => (
-                   <div key={prop} className="flex flex-col">
-                     <label className="text-[10px] text-muted-foreground">{prop}</label>
-                     <input 
-                        className="p-1 text-xs bg-background border border-input rounded"
-                        value={element.styles[prop] || ''}
-                        placeholder="0px"
-                        onChange={(e) => updateStyle(prop, e.target.value)}
-                     />
-                   </div>
-                 ))}
-              </div>
-            </div>
-
-            {/* Layout */}
-            <div>
-              <h4 className="text-xs font-bold mb-2">Layout</h4>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Display</label>
-                <select
-                  className="w-full p-1 text-xs bg-background border border-input rounded"
-                  value={element.styles.display || ''}
-                  onChange={(e) => updateStyle('display', e.target.value)}
-                >
-                  <option value="">Default</option>
-                  <option value="block">Block</option>
-                  <option value="inline">Inline</option>
-                  <option value="flex">Flex</option>
-                  <option value="inline-flex">Inline Flex</option>
-                  <option value="grid">Grid</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Size */}
-            <div>
-              <h4 className="text-xs font-bold mb-2">Size</h4>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Width</label>
-                  <input
-                    type="text"
-                    className="w-full p-1 text-xs bg-background border border-input rounded"
-                    value={element.styles.width || ''}
-                    onChange={(e) => updateStyle('width', e.target.value)}
-                    placeholder="auto"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Height</label>
-                  <input
-                    type="text"
-                    className="w-full p-1 text-xs bg-background border border-input rounded"
-                    value={element.styles.height || ''}
-                    onChange={(e) => updateStyle('height', e.target.value)}
-                    placeholder="auto"
-                  />
-                </div>
-              </div>
-            </div>
-
+        {activeTab === "styles" && element.styles && (
+          <div className="space-y-4">
+            <SpaceSVG styles={element.styles} onEdit={updateStyle} />
+            
             {/* Typography */}
             <div>
               <h4 className="text-xs font-bold mb-2">Typography</h4>
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Font Size</label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Color</label>
+                  <div className="flex gap-1">
                     <input
-                        type="text"
-                        className="w-full p-1 text-xs bg-background border border-input rounded"
-                        value={element.styles.fontSize || ''}
-                        onChange={(e) => updateStyle('fontSize', e.target.value)}
+                      type="color"
+                      className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
+                      value={element.styles.color || "#000000"}
+                      onChange={(e) => updateStyle("color", e.target.value)}
                     />
-                    </div>
-                    <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Color</label>
-                    <div className="flex gap-1">
-                        <input
-                        type="color"
-                        className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
-                        value={element.styles.color || '#000000'}
-                        onChange={(e) => updateStyle('color', e.target.value)}
-                        />
-                        <input
-                        type="text"
-                        className="flex-1 p-1 text-xs bg-background border border-input rounded"
-                        value={element.styles.color || ''}
-                        onChange={(e) => updateStyle('color', e.target.value)}
-                        />
-                    </div>
-                    </div>
+                    <input
+                      type="text"
+                      className="flex-1 p-1 text-xs bg-background border border-input rounded"
+                      value={element.styles.color || ""}
+                      onChange={(e) => updateStyle("color", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Font Size</label>
+                  <input
+                    type="text"
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={element.styles.fontSize || ""}
+                    onChange={(e) => updateStyle("fontSize", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Font Weight</label>
+                  <select 
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={element.styles.fontWeight || "normal"}
+                    onChange={(e) => updateStyle("fontWeight", e.target.value)}
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="bold">Bold</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="300">300</option>
+                    <option value="400">400</option>
+                    <option value="500">500</option>
+                    <option value="600">600</option>
+                    <option value="700">700</option>
+                    <option value="800">800</option>
+                    <option value="900">900</option>
+                  </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Text Align</label>
                   <select 
                     className="w-full p-1 text-xs bg-background border border-input rounded"
-                    value={element.styles.textAlign || 'left'}
-                    onChange={(e) => updateStyle('textAlign', e.target.value)}
+                    value={element.styles.textAlign || "left"}
+                    onChange={(e) => updateStyle("textAlign", e.target.value)}
                   >
                     <option value="left">Left</option>
                     <option value="center">Center</option>
@@ -324,14 +416,14 @@ export const Properties: React.FC = () => {
                     <input
                     type="color"
                     className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
-                    value={element.styles.backgroundColor || '#ffffff'}
-                    onChange={(e) => updateStyle('backgroundColor', e.target.value)}
+                    value={element.styles.backgroundColor || "#ffffff"}
+                    onChange={(e) => updateStyle("backgroundColor", e.target.value)}
                     />
                     <input
                     type="text"
                     className="flex-1 p-1 text-xs bg-background border border-input rounded"
-                    value={element.styles.backgroundColor || ''}
-                    onChange={(e) => updateStyle('backgroundColor', e.target.value)}
+                    value={element.styles.backgroundColor || ""}
+                    onChange={(e) => updateStyle("backgroundColor", e.target.value)}
                     />
                 </div>
               </div>
@@ -346,8 +438,8 @@ export const Properties: React.FC = () => {
                     <input
                         type="text"
                         className="w-full p-1 text-xs bg-background border border-input rounded"
-                        value={element.styles.borderWidth || ''}
-                        onChange={(e) => updateStyle('borderWidth', e.target.value)}
+                        value={element.styles.borderWidth || ""}
+                        onChange={(e) => updateStyle("borderWidth", e.target.value)}
                     />
                   </div>
                   <div className="space-y-1">
@@ -355,8 +447,8 @@ export const Properties: React.FC = () => {
                     <input
                         type="text"
                         className="w-full p-1 text-xs bg-background border border-input rounded"
-                        value={element.styles.borderRadius || ''}
-                        onChange={(e) => updateStyle('borderRadius', e.target.value)}
+                        value={element.styles.borderRadius || ""}
+                        onChange={(e) => updateStyle("borderRadius", e.target.value)}
                     />
                   </div>
               </div>

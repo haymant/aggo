@@ -1,17 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../../tailwind.config.cjs";
 
 /* Additional small overrides used by the placeholder webview app */
 html, body, #root { height: 100%; }
 .aggo-root { font-family: var(--vscode-font-family, 'Segoe WPC', 'Segoe UI', 'Helvetica Neue', Arial); padding: 10px; height:100%; display:flex; flex-direction:column }
 .aggo-header h2{ margin:0; font-size:1.1rem }
-.aggo-subtitle{ font-size:0.85rem; color:#666 }
+.aggo-subtitle{ font-size:0.85rem; color:var(--vscode-editor-foreground) }
 .tabs-root{ flex:1; display:flex; flex-direction:column }
 .editor-text{ width:100%; height:100%; box-sizing:border-box }
 .preview{ white-space:pre-wrap; word-wrap: break-word }
 .aggo-footer{ margin-top:8px }
-.aggo-placeholder{ padding:10px; color:#666 }
+.aggo-placeholder{ padding:10px; color:var(--vscode-editor-foreground) }
 
 /* Force dark theme variables to apply even if nested .jsonjoy elements reset them */
 .jsonjoy.dark,
@@ -37,3 +36,69 @@ html, body, #root { height: 100%; }
     --jsonjoy-input: #1e293b;
     --jsonjoy-ring: #cbd5e1;
 }
+
+/* Global webview background and text colors from VSCode theme */
+html, body, #root, .aggo-root { background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
+
+/* Map a set of aggo CSS variables to VSCode variables so we can use them in components */
+:root {
+    --aggo-bg: var(--vscode-editor-background);
+    --aggo-fg: var(--vscode-editor-foreground);
+    --aggo-border: var(--vscode-focusBorder, #d1d5db);
+    --aggo-accent: var(--vscode-editor-selectionBackground, #059669);
+    --aggo-card: var(--vscode-editorWidget-background, #ffffff);
+    --aggo-muted: var(--vscode-editorWidget-border, #d1d5db);
+    --aggo-badge-bg: var(--vscode-button-background);
+    --aggo-badge-fg: var(--vscode-button-foreground);
+}
+
+/* Provide quick classes used by CPN components */
+.aggo-card { background-color: var(--aggo-card) !important; color: var(--aggo-fg) !important }
+.aggo-border { border-color: var(--aggo-border) !important }
+.aggo-border-selected { border-color: var(--aggo-accent) !important; box-shadow: 0 0 0 3px rgba(0,0,0,0.06); }
+.aggo-badge { background-color: var(--aggo-badge-bg); color: var(--aggo-badge-fg); border-color: transparent }
+.aggo-accent { color: var(--aggo-accent) }
+
+/* Ensure elements inherit the vscode body theme class for the vscode-light/dark selectors */
+body.vscode-light .aggo-card { /* nothing additional for now */ }
+body.vscode-dark .aggo-card { /* nothing additional for now */ }
+
+/* Toolbar styling */
+.aggo-toolbar { padding: 4px; border-radius: 6px; background: color-mix(in srgb, var(--vscode-editorWidget-background) 80%, transparent); border: 1px solid var(--vscode-editorWidget-border); }
+.vscode-dark .aggo-toolbar, body.vscode-dark .aggo-toolbar { background: color-mix(in srgb, var(--vscode-editorWidget-background) 80%, transparent); }
+
+/* Handles style (left/right) */
+.aggo-handle {
+    background-color: var(--vscode-editor-foreground, #a3a3a3) !important;
+    border-radius: 9999px !important;
+    border: 2px solid var(--vscode-editor-background) !important;
+    cursor: crosshair;
+}
+
+/* XYFlow (React Flow) variable overrides scoped to each flow */
+.react-flow {
+    --xy-background-color: var(--vscode-editor-background, #ffffff);
+    --xy-edge-stroke-default: var(--aggo-muted, #9ca3af);
+    --xy-edge-stroke-selected: var(--aggo-accent, #059669);
+    --xy-node-background-color: var(--aggo-card, var(--vscode-editorWidget-background, #ffffff));
+    --xy-node-border: 1px solid var(--aggo-border, var(--vscode-editorWidget-border, rgba(0,0,0,0.08)));
+    --xy-node-color: var(--aggo-fg, var(--vscode-editor-foreground));
+    --xy-handle-background-color: var(--vscode-editor-foreground);
+    --xy-handle-border-color: var(--vscode-editor-background);
+    --xy-edge-label-background-color: var(--vscode-editorWidget-background);
+    --xy-edge-label-color: var(--vscode-editor-foreground);
+    --xy-minimap-node-background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 70%, transparent);
+    --xy-controls-button-background-color: transparent;
+    --xy-controls-button-color: var(--vscode-editor-foreground);
+}
+
+/* Lucide icon overrides within XYFlow Controls to use stroke outlines */
+.react-flow__controls .react-flow__controls-button svg { fill: none !important; stroke: currentColor !important; stroke-width: 1.5 !important; }
+.react-flow__controls .react-flow__controls-button svg [fill] { fill: none !important; }
+.react-flow__controls .react-flow__controls-button { background: transparent; }
+
+/* Edge label pointer events and appearance */
+.react-flow__edge .react-flow__edge-text, .react-flow__edge .react-flow__edge-textbg { pointer-events: all; }
+/* Make the minimap fit VSCode theme */
+.react-flow.dark .react-flow__minimap{ background: var(--xy-minimap-background-color, #141414) }
+
