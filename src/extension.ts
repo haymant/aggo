@@ -13,6 +13,7 @@ import { parseJsonText, createSchemaFromJson } from './utils/schemaInference';
 import { getActivePanel } from './utils/activePanel';
 import * as path from 'path';
 import * as fs from 'fs';
+import { getPanelByViewType } from './utils/activePanel';
 
 export function activate(context: vscode.ExtensionContext) {
   try {
@@ -156,6 +157,14 @@ export function activate(context: vscode.ExtensionContext) {
       const active = getActivePanel();
       if (active) {
         active.webview.postMessage({ type: 'insertComponent', data });
+        return;
+      }
+      // Fallback: send to any open page editor panel (even if not focused)
+      try {
+        const panel = getPanelByViewType('aggo.pageEditor');
+        if (panel) panel.webview.postMessage({ type: 'insertComponent', data });
+      } catch (e) {
+        console.warn('[aggo] insertComponent: no active page editor to receive insert', e);
       }
   }));
 

@@ -5,6 +5,7 @@ import { AggoPropertyViewProvider } from '../views/AggoPropertyViewProvider';
 import { setActivePanel, getActivePanel } from '../utils/activePanel';
 import { normalizeBridgeContent } from '../utils/fileBridge';
 import { attachFileBridgeHandler } from '../utils/attachFileBridgeHandler';
+import { registerPanel, unregisterPanel } from '../utils/activePanel';
 
 export class AggoSchemaEditorProvider implements vscode.CustomTextEditorProvider {
   public static activePanel: vscode.WebviewPanel | undefined;
@@ -23,6 +24,7 @@ export class AggoSchemaEditorProvider implements vscode.CustomTextEditorProvider
     webviewPanel.webview.html = html;
 
     if (webviewPanel.active) setActivePanel(webviewPanel);
+    registerPanel(webviewPanel, this.viewType);
     webviewPanel.onDidChangeViewState(e => {
       if (e.webviewPanel.active) setActivePanel(e.webviewPanel);
       else if (getActivePanel && getActivePanel() === e.webviewPanel) setActivePanel(undefined);
@@ -57,6 +59,7 @@ export class AggoSchemaEditorProvider implements vscode.CustomTextEditorProvider
       }
     });
 
+    webviewPanel.onDidDispose(() => { unregisterPanel(webviewPanel, this.viewType); });
     const docChangeWatcher = vscode.workspace.onDidChangeTextDocument((ev) => {
       if (ev.document.uri.toString() === document.uri.toString()) {
         webviewPanel.webview.postMessage({ type: 'documentChanged', text: ev.document.getText() });

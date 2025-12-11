@@ -370,15 +370,13 @@ Option 3`,
 				name: "Radio",
 				description: "Radio button",
 				template: {
-					tagName: "input",
-					attributes: {
-						type: "radio",
-						name: "radio-group",
-					},
-					styles: {
-						margin: "8px",
-						cursor: "pointer",
-					},
+					tagName: "label",
+					attributes: {},
+					styles: { display: 'block', margin: '8px' },
+					children: [
+						{ tagName: 'input', attributes: { type: 'radio', name: 'radio-group' }, styles: { cursor: 'pointer' } },
+						{ tagName: 'span', content: 'Radio option', styles: { marginLeft: '8px' } }
+					]
 				},
 			},
 			{
@@ -386,14 +384,13 @@ Option 3`,
 				name: "Checkbox",
 				description: "Checkbox input",
 				template: {
-					tagName: "input",
-					attributes: {
-						type: "checkbox",
-					},
-					styles: {
-						margin: "8px",
-						cursor: "pointer",
-					},
+					tagName: "label",
+					attributes: {},
+					styles: { display: 'block', margin: '8px' },
+					children: [
+						{ tagName: 'input', attributes: { type: 'checkbox' }, styles: { cursor: 'pointer' } },
+						{ tagName: 'span', content: 'Checkbox label', styles: { marginLeft: '8px' } }
+					]
 				},
 			},
 		],

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { getHtmlForWebview } from '../utils/webviewHelper';
-import { setActivePanel } from '../utils/activePanel';
+import { setActivePanel, registerPanel, unregisterPanel } from '../utils/activePanel';
 import { attachFileBridgeHandler } from '../utils/attachFileBridgeHandler';
 
 export class AggoMcpEditorProvider implements vscode.CustomTextEditorProvider {
@@ -13,6 +13,7 @@ export class AggoMcpEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.webview.options = { enableScripts: true, localResourceRoots: [this.extensionUri] };
     webviewPanel.webview.html = getHtmlForWebview(webviewPanel.webview, this.extensionUri, this.viewType, this.title, this.isDev);
     if (webviewPanel.active) setActivePanel(webviewPanel);
+    registerPanel(webviewPanel, this.viewType);
     webviewPanel.onDidChangeViewState(e => { if (e.webviewPanel.active) setActivePanel(e.webviewPanel); else setActivePanel(undefined); });
 
     const bridge = attachFileBridgeHandler({ webviewPanel, document, openWithEditor: 'aggo.mcpEditor', preferDocumentDir: true });
@@ -36,7 +37,7 @@ export class AggoMcpEditorProvider implements vscode.CustomTextEditorProvider {
     const docChangeWatcher = vscode.workspace.onDidChangeTextDocument((ev) => {
       if (ev.document.uri.toString() === document.uri.toString()) webviewPanel.webview.postMessage({ type: 'documentChanged', text: ev.document.getText() });
     });
-    webviewPanel.onDidDispose(() => { docChangeWatcher.dispose(); bridge.dispose(); });
+    webviewPanel.onDidDispose(() => { docChangeWatcher.dispose(); bridge.dispose(); unregisterPanel(webviewPanel, this.viewType); });
   }
 }
 

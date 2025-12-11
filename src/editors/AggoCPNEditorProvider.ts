@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { getDevServer } from '../utils/devServer';
-import { setActivePanel } from '../utils/activePanel';
+import { setActivePanel, registerPanel, unregisterPanel } from '../utils/activePanel';
 import { normalizeBridgeContent } from '../utils/fileBridge';
 import { AggoPropertyViewProvider } from '../views/AggoPropertyViewProvider';
 
@@ -21,7 +21,8 @@ export class AggoCPNEditorProvider implements vscode.CustomTextEditorProvider {
     const html = this.getHtmlForWebview(webviewPanel.webview);
     webviewPanel.webview.html = html;
 
-    if (webviewPanel.active) setActivePanel(webviewPanel);
+      if (webviewPanel.active) setActivePanel(webviewPanel);
+      registerPanel(webviewPanel, 'aggo.cpnEditor');
     webviewPanel.onDidChangeViewState(e => { if (e.webviewPanel.active) setActivePanel(e.webviewPanel); else setActivePanel(undefined); });
 
     const fetchRemoteText = async (url: string): Promise<string> => {
@@ -202,6 +203,7 @@ export class AggoCPNEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
     webviewPanel.onDidDispose(() => { docChangeWatcher.dispose(); if (updateTimer) clearTimeout(updateTimer); });
+    webviewPanel.onDidDispose(() => { docChangeWatcher.dispose(); unregisterPanel(webviewPanel, 'aggo.cpnEditor'); });
     
       // Forward theme changes to the webview to keep the UI consistent
       const themeWatcher = vscode.window.onDidChangeActiveColorTheme((e) => {

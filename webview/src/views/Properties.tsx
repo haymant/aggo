@@ -14,39 +14,61 @@ type ElementData = {
 };
 
 const SpaceSVG: React.FC<{ styles: Record<string, string>; onEdit: (prop: string, val: string) => void }> = ({ styles, onEdit }) => {
-  const getValue = (val?: string) => (!val || val === "0" || val === "0px") ? "0" : val.replace("px", "");
+  const getValue = (val?: string) => (!val || val === "0" || val === "0px") ? "0" : String(val).replace("px", "");
   
-  const mt = getValue(styles.marginTop);
-  const mr = getValue(styles.marginRight);
-  const mb = getValue(styles.marginBottom);
-  const ml = getValue(styles.marginLeft);
-  const pt = getValue(styles.paddingTop);
-  const pr = getValue(styles.paddingRight);
-  const pb = getValue(styles.paddingBottom);
-  const pl = getValue(styles.paddingLeft);
+  const mt = getValue(styles.marginTop || styles.margin?.split(' ')[0]);
+  const mr = getValue(styles.marginRight || styles.margin?.split(' ')[1] || styles.margin?.split(' ')[0]);
+  const mb = getValue(styles.marginBottom || styles.margin?.split(' ')[2] || styles.margin?.split(' ')[0]);
+  const ml = getValue(styles.marginLeft || styles.margin?.split(' ')[3] || styles.margin?.split(' ')[1] || styles.margin?.split(' ')[0]);
+  const pt = getValue(styles.paddingTop || styles.padding?.split(' ')[0]);
+  const pr = getValue(styles.paddingRight || styles.padding?.split(' ')[1] || styles.padding?.split(' ')[0]);
+  const pb = getValue(styles.paddingBottom || styles.padding?.split(' ')[2] || styles.padding?.split(' ')[0]);
+  const pl = getValue(styles.paddingLeft || styles.padding?.split(' ')[3] || styles.padding?.split(' ')[1] || styles.padding?.split(' ')[0]);
+
+  const updateSide = (key: string, value: string) => {
+    // take numeric input and store with px if needed
+    let v = value === '' ? '' : (String(value).match(/px$/) ? value : value + 'px');
+    onEdit(key, v);
+  };
 
   return (
     <div className="flex justify-center p-4 select-none">
-      <svg width="200" height="160" viewBox="0 0 200 160" className="text-xs font-mono">
+      <svg width="220" height="160" viewBox="0 0 220 160" className="text-xs font-mono">
         {/* Margin Box */}
-        <rect x="10" y="10" width="180" height="140" fill="rgba(251, 146, 60, 0.1)" stroke="rgb(251, 146, 60)" strokeDasharray="4,2" rx="4" />
-        <text x="100" y="25" textAnchor="middle" fill="rgb(234, 88, 12)">{mt}</text>
-        <text x="100" y="145" textAnchor="middle" fill="rgb(234, 88, 12)">{mb}</text>
-        <text x="25" y="85" textAnchor="middle" fill="rgb(234, 88, 12)" transform="rotate(-90, 25, 85)">{ml}</text>
-        <text x="175" y="85" textAnchor="middle" fill="rgb(234, 88, 12)" transform="rotate(90, 175, 85)">{mr}</text>
+        <rect x="10" y="10" width="200" height="140" fill="rgba(251, 146, 60, 0.1)" stroke="rgb(251, 146, 60)" strokeDasharray="4,2" rx="4" />
+        <foreignObject x="80" y="12" width="60" height="20">
+          <input className="text-xs w-full p-0 text-center" value={mt} onChange={(e) => updateSide('marginTop', e.target.value)} />
+        </foreignObject>
+        <foreignObject x="80" y="128" width="60" height="20">
+          <input className="text-xs w-full p-0 text-center" value={mb} onChange={(e) => updateSide('marginBottom', e.target.value)} />
+        </foreignObject>
+        <foreignObject x="12" y="60" width="50" height="20">
+          <input className="text-xs w-full p-0 text-center" value={ml} onChange={(e) => updateSide('marginLeft', e.target.value)} />
+        </foreignObject>
+        <foreignObject x="158" y="60" width="50" height="20">
+          <input className="text-xs w-full p-0 text-center" value={mr} onChange={(e) => updateSide('marginRight', e.target.value)} />
+        </foreignObject>
         <text x="14" y="15" fill="rgb(234, 88, 12)" fontSize="8">margin</text>
 
         {/* Padding Box */}
-        <rect x="30" y="30" width="140" height="100" fill="rgba(163, 230, 53, 0.1)" stroke="rgb(132, 204, 22)" strokeDasharray="4,2" rx="2" />
-        <text x="100" y="45" textAnchor="middle" fill="rgb(101, 163, 13)">{pt}</text>
-        <text x="100" y="125" textAnchor="middle" fill="rgb(101, 163, 13)">{pb}</text>
-        <text x="45" y="85" textAnchor="middle" fill="rgb(101, 163, 13)" transform="rotate(-90, 45, 85)">{pl}</text>
-        <text x="155" y="85" textAnchor="middle" fill="rgb(101, 163, 13)" transform="rotate(90, 155, 85)">{pr}</text>
+        <rect x="30" y="30" width="160" height="100" fill="rgba(163, 230, 53, 0.1)" stroke="rgb(132, 204, 22)" strokeDasharray="4,2" rx="2" />
+        <foreignObject x="100" y="34" width="40" height="20">
+          <input className="text-xs w-full p-0 text-center" value={pt} onChange={(e) => updateSide('paddingTop', e.target.value)} />
+        </foreignObject>
+        <foreignObject x="100" y="108" width="40" height="20">
+          <input className="text-xs w-full p-0 text-center" value={pb} onChange={(e) => updateSide('paddingBottom', e.target.value)} />
+        </foreignObject>
+        <foreignObject x="38" y="64" width="40" height="20">
+          <input className="text-xs w-full p-0 text-center" value={pl} onChange={(e) => updateSide('paddingLeft', e.target.value)} />
+        </foreignObject>
+        <foreignObject x="142" y="64" width="40" height="20">
+          <input className="text-xs w-full p-0 text-center" value={pr} onChange={(e) => updateSide('paddingRight', e.target.value)} />
+        </foreignObject>
         <text x="34" y="38" fill="rgb(101, 163, 13)" fontSize="8">padding</text>
 
         {/* Content Box */}
-        <rect x="50" y="50" width="100" height="60" fill="rgba(96, 165, 250, 0.1)" stroke="rgb(59, 130, 246)" rx="1" />
-        <text x="100" y="85" textAnchor="middle" fill="rgb(37, 99, 235)">content</text>
+        <rect x="60" y="50" width="100" height="60" fill="rgba(96, 165, 250, 0.1)" stroke="rgb(59, 130, 246)" rx="1" />
+        <text x="110" y="85" textAnchor="middle" fill="rgb(37, 99, 235)">content</text>
       </svg>
     </div>
   );
@@ -238,8 +260,8 @@ export const Properties: React.FC = () => {
   };
 
   const updateStyle = (key: string, value: string) => {
-    if (!element || !element.styles) return;
-    const newStyles = { ...element.styles };
+    if (!element) return;
+    const newStyles = { ...(element.styles || {}) };
     if (!value) {
       delete newStyles[key];
     } else {
@@ -337,9 +359,9 @@ export const Properties: React.FC = () => {
           </div>
         )}
 
-        {activeTab === "styles" && element.styles && (
+        {activeTab === "styles" && (
           <div className="space-y-4">
-            <SpaceSVG styles={element.styles} onEdit={updateStyle} />
+            <SpaceSVG styles={element.styles || {}} onEdit={updateStyle} />
             
             {/* Typography */}
             <div>
@@ -402,6 +424,70 @@ export const Properties: React.FC = () => {
                     <option value="center">Center</option>
                     <option value="right">Right</option>
                     <option value="justify">Justify</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Size */}
+            <div>
+              <h4 className="text-xs font-bold mb-2">Size</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Width</label>
+                  <input
+                    type="text"
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={element.styles.width || ""}
+                    onChange={(e) => updateStyle("width", e.target.value)}
+                    placeholder="auto"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Height</label>
+                  <input
+                    type="text"
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={element.styles.height || ""}
+                    onChange={(e) => updateStyle("height", e.target.value)}
+                    placeholder="auto"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Layout */}
+            <div>
+              <h4 className="text-xs font-bold mb-2">Layout</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Display</label>
+                  <select
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={(element.styles && element.styles.display) || "block"}
+                    onChange={(e) => updateStyle("display", e.target.value)}
+                  >
+                    <option value="block">block</option>
+                    <option value="inline">inline</option>
+                    <option value="inline-block">inline-block</option>
+                    <option value="flex">flex</option>
+                    <option value="inline-flex">inline-flex</option>
+                    <option value="grid">grid</option>
+                    <option value="inline-grid">inline-grid</option>
+                    <option value="none">none</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Flex Direction</label>
+                  <select
+                    className="w-full p-1 text-xs bg-background border border-input rounded"
+                    value={(element.styles && element.styles.flexDirection) || "row"}
+                    onChange={(e) => updateStyle("flexDirection", e.target.value)}
+                  >
+                    <option value="row">row</option>
+                    <option value="row-reverse">row-reverse</option>
+                    <option value="column">column</option>
+                    <option value="column-reverse">column-reverse</option>
                   </select>
                 </div>
               </div>
