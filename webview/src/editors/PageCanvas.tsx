@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { vscode } from '../utils/vscode';
+import { SquarePen, Eye } from 'lucide-react';
 
 interface PageElement {
   id: string;
@@ -52,6 +53,29 @@ const ElementRenderer: React.FC<{
     outline: isSelected ? '2px solid #3b82f6' : undefined,
     cursor: editMode ? 'grab' : 'default'
   };
+
+  // Plugin rendering path: if element declares a data-component attribute and the plugin is loaded, use it
+  const componentId = (element.attributes && (element.attributes as any)['data-component']) as string | undefined;
+  if (componentId && (window as any).__aggo_plugins__ && (window as any).__aggo_plugins__[componentId]) {
+    const plugin = (window as any).__aggo_plugins__[componentId];
+    if (plugin && plugin.Component) {
+      const pluginProps: any = {
+        id: element.id,
+        attributes: element.attributes || {},
+        content: element.content,
+        styles: element.styles || {},
+        editMode,
+        onSelect: () => onSelect(element),
+        onChange: (delta: any) => {
+          // map plugin-driven changes back to host via postMessage
+          const updated = { id: element.id, ...delta } as any;
+          // send update request to host
+          try { vscode.postMessage({ type: 'updateElement', element: updated }); } catch (err) { /* noop */ }
+        }
+      };
+      return React.createElement(plugin.Component, pluginProps);
+    }
+  }
 
   // Handle void elements (no children/content) with exceptions for checkbox/radio inputs
   const voidElements = ['img', 'input', 'hr', 'br'];
@@ -192,6 +216,8 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
   // Refs for stable access in event listeners
   const dataRef = useRef(data);
   const selectedIdRef = useRef(selectedId);
+  const [pluginRegistry, setPluginRegistry] = useState<Record<string, any>>({});
+  const loadedScriptsRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
@@ -443,6 +469,30 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
           vscode.postMessage({ type: 'selectionChanged', element: selectedElement });
         }
       }
+      else if (msg.type === 'componentCatalogUpdated' && msg.registry) {
+        // Populate registry state and attempt to load plugin artifacts into the webview
+        try {
+          setPluginRegistry(msg.registry);
+          const entries = msg.registry || {};
+          for (const key of Object.keys(entries)) {
+            const entry = entries[key];
+            try {
+              // If plugin already registered on window, skip
+              if ((window as any).__aggo_plugins__ && (window as any).__aggo_plugins__[key]) continue;
+              const url = entry.file as string;
+              if (!url) continue;
+              if (loadedScriptsRef.current[url]) continue;
+              const s = document.createElement('script');
+              s.src = url;
+              s.async = true;
+              s.onload = () => { loadedScriptsRef.current[url] = true; console.debug('[PageCanvas] loaded plugin', key); };
+              s.onerror = (err) => { console.warn('[PageCanvas] failed to load plugin script', url, err); loadedScriptsRef.current[url] = false; };
+              document.head.appendChild(s);
+              loadedScriptsRef.current[url] = true;
+            } catch (err) { console.warn('[PageCanvas] failed to append plugin script', err); }
+          }
+        } catch (err) { console.warn('[PageCanvas] failed handling componentCatalogUpdated msg', err); }
+      }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -638,8 +688,26 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
       onClick={() => { if (!editMode) return; setSelectedId(null); vscode.postMessage({ type: 'selectionChanged', element: null }); }}
       ref={rootRef}
     >
-      <div style={{ position: 'absolute', left: 10, top: 10, zIndex: 60 }}>
-        <button onClick={() => setEditMode(v => !v)} className="aggo-toolbar">{editMode ? 'Edit Mode' : 'Preview Mode'}</button>
+      <div style={{ position: 'absolute', right: 8, top: 0, zIndex: 80, pointerEvents: 'auto' }}>
+        <button
+          onClick={() => setEditMode(v => !v)}
+          className="aggo-toolbar flex items-center justify-center p-0"
+          style={{
+            backgroundColor: editMode ? '#374151' : '#f3f4f6',
+            color: editMode ? '#ffffff' : '#111827',
+            padding: 0,
+            width: 36,
+            height: 36,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          aria-pressed={editMode}
+          title={editMode ? 'Switch to Preview Mode' : 'Switch to Edit Mode'}
+          aria-label={editMode ? 'Edit mode currently active; switch to preview' : 'Preview mode currently active; switch to edit'}
+        >
+          {editMode ? <SquarePen className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+        </button>
       </div>
       <div className="min-h-full shadow-sm mx-auto bg-white" style={{ maxWidth: '100%' }}>
         <ElementRenderer element={data} selectedId={selectedId} editMode={editMode} draggingId={draggingId} onSelect={handleSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOverElem={onDragOverElem} onDropElem={onDropElem} onTabNext={handleTabNext} />

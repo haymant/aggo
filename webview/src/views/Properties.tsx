@@ -238,12 +238,15 @@ const CPNProperties: React.FC<{ element: ElementData; onUpdate: (data: ElementDa
 export const Properties: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"props" | "styles">("props");
   const [element, setElement] = useState<ElementData | null>(null);
+  const [pluginRegistry, setPluginRegistry] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       const msg = ev.data;
       if (msg.type === "selectionChanged") {
         setElement(msg.element);
+      } else if (msg.type === 'componentCatalogUpdated') {
+        try { setPluginRegistry(msg.registry || {}); } catch (err) { console.warn('[aggo properties] invalid registry', err); }
       } else if (msg.type === "update") {
         // Handle updates from extension if needed
       }
@@ -356,6 +359,30 @@ export const Properties: React.FC = () => {
                 onChange={(e) => updateElement({ content: e.target.value })}
               />
             </div>
+            {/* Plugin props section */}
+            {element?.attributes && (element.attributes as any)['data-component'] && (() => {
+              const cid = (element.attributes as any)['data-component'] as string;
+              const entry = pluginRegistry[cid];
+              if (!entry || !entry.schema) return <></>;
+              const propsSchema = (entry.schema as any).properties || {};
+              return (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold">Plugin Properties</h4>
+                  {Object.keys(propsSchema).map((p) => {
+                    const def = propsSchema[p];
+                    if (def.type === 'string') {
+                      return (
+                        <div key={p} className="space-y-1">
+                          <label className="text-xs text-muted-foreground">{def.title || p}</label>
+                          <input type="text" className="w-full p-1 text-xs bg-background border border-input rounded" value={(element.attributes as any)[p] || ''} onChange={(e) => updateAttr(p, e.target.value)} />
+                        </div>
+                      );
+                    }
+                    return (<div key={p}>{p}: unsupported field type</div>);
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 

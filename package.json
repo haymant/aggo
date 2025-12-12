@@ -198,6 +198,11 @@
         "command": "aggo.validateAgainstSchema",
         "title": "Aggo: Validate against JSON Schema"
       }
+      ,
+      {
+        "command": "aggo.installComponent",
+        "title": "Aggo: Install Component from JS bundle"
+      }
     ],
     "menus": {
       "explorer/context": [

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { getHtmlForWebview } from '../utils/webviewHelper';
 import { normalizeBridgeContent } from '../utils/fileBridge';
@@ -146,6 +147,26 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
           type: 'init',
           viewType: AggoPropertyViewProvider.viewType
         });
+        // send initial component registry if present
+        try {
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (!workspaceFolder) return;
+          const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+          if (!fs.existsSync(registryPath)) return;
+          const raw = fs.readFileSync(registryPath, 'utf8');
+          const registry = JSON.parse(raw || '{}');
+          const mapped: any = {};
+          for (const key of Object.keys(registry)) {
+            try {
+              const entry = registry[key];
+              const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+              const fileUri = vscode.Uri.file(filePath);
+              const webUri = webviewView.webview.asWebviewUri(fileUri).toString();
+              mapped[key] = { ...entry, file: webUri };
+            } catch (err) { console.warn('[aggo] failed mapping registry entry for property view', err); }
+          }
+          webviewView.webview.postMessage({ type: 'componentCatalogUpdated', registry: mapped });
+        } catch (err) { console.warn('[aggo] failed to load registry for property view', err); }
       } else if (message.type === 'updateElement') {
         vscode.commands.executeCommand('aggo.updateElement', message.element);
       }

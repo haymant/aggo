@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { getHtmlForWebview } from '../utils/webviewHelper';
 import { setActivePanel, registerPanel, unregisterPanel } from '../utils/activePanel';
 import { AggoPropertyViewProvider } from '../views/AggoPropertyViewProvider';
@@ -22,6 +24,30 @@ export class AggoPageEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.webview.onDidReceiveMessage(async (msg: any) => {
       if (msg.type === 'ready') {
         webviewPanel.webview.postMessage({ type: 'init', viewType: this.viewType, title: this.title, uri: document.uri.toString(), text: document.getText() });
+        // Also send available component registry if present
+        try {
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (workspaceFolder) {
+            const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+            if (fs.existsSync(registryPath)) {
+              const raw = fs.readFileSync(registryPath, 'utf8');
+              const registry = JSON.parse(raw || '{}');
+              const mapped: any = {};
+              for (const key of Object.keys(registry)) {
+                try {
+                  const entry = registry[key];
+                  const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+                  const fileUri = vscode.Uri.file(filePath);
+                  const webUri = webviewPanel.webview.asWebviewUri(fileUri).toString();
+                  mapped[key] = { ...entry, file: webUri };
+                } catch (err) { console.warn('[aggo] failed mapping registry entry for page editor', err); }
+              }
+              webviewPanel.webview.postMessage({ type: 'componentCatalogUpdated', registry: mapped });
+            }
+          }
+        } catch (err) {
+          console.warn('[aggo] failed to load component registry for page editor', err);
+        }
       } else if (msg.type === 'update') {
         try {
           const edit = new vscode.WorkspaceEdit();
@@ -44,6 +70,7 @@ export class AggoPageEditorProvider implements vscode.CustomTextEditorProvider {
     const docChangeWatcher = vscode.workspace.onDidChangeTextDocument((ev) => {
       if (ev.document.uri.toString() === document.uri.toString()) webviewPanel.webview.postMessage({ type: 'documentChanged', text: ev.document.getText() });
     });
+    // NOTE: Centralized watcher exists in extension.ts; the page editor will receive broadcasts from the extension
     webviewPanel.onDidDispose(() => { docChangeWatcher.dispose(); bridge.dispose(); unregisterPanel(webviewPanel, this.viewType); });
   }
 }

@@ -398,6 +398,7 @@ Option 3`,
 ];
 
 export const Library: React.FC = () => {
+	const [pluginComponents, setPluginComponents] = useState<Record<string, any>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ general: true, typography: false, media: false, form: false });
 
   const toggle = (key: string) => {
@@ -413,11 +414,48 @@ export const Library: React.FC = () => {
 		vscode.postMessage({ type: 'addComponent', data: component.template });
 	};
 
-  return (
+	React.useEffect(() => {
+		const handler = (ev: MessageEvent) => {
+			if (ev?.data?.type === 'componentCatalogUpdated') {
+				try { setPluginComponents(ev.data.registry || {}); } catch (err) { console.warn('[aggo library] failed parsing componentCatalogUpdated', err); }
+			}
+		};
+		window.addEventListener('message', handler);
+		// Signal that Library is mounted and ready to receive registry
+		vscode.postMessage({ type: 'libraryReady' });
+		return () => window.removeEventListener('message', handler);
+	}, []);
+
+	const categoriesWithPlugins = React.useMemo(() => {
+		const out = [...componentCategories];
+		const ids = Object.keys(pluginComponents || {});
+		if (ids.length > 0) {
+			const components = ids.map(id => {
+				const entry = pluginComponents[id];
+				// Registry format is { id, name, category, icon, file }
+				const template: any = {
+					tagName: 'plugin',
+					attributes: { 'data-component': id },
+					styles: {},
+					content: ''
+				};
+				return {
+					icon: entry.icon || 'Square',
+					name: entry.name || id,
+					description: entry.category || 'Plugin',
+					template
+				};
+			});
+			out.push({ key: 'plugins', label: 'Plugins', components });
+		}
+		return out;
+	}, [pluginComponents]);
+
+	return (
     <div className="p-2 select-none">
       <h3 className="text-sm font-bold mb-4 px-1">Components</h3>
       <div className="space-y-2">
-        {componentCategories.map(category => (
+		{categoriesWithPlugins.map(category => (
           <div key={category.key} className="border border-border rounded-md overflow-hidden">
             <div 
               className="bg-secondary/50 p-2 text-xs font-semibold cursor-pointer flex justify-between items-center hover:bg-secondary"

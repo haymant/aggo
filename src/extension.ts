@@ -15,6 +15,60 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getPanelByViewType } from './utils/activePanel';
 
+// Broadcast component registry to all registered panels (library, page editor, properties)
+async function broadcastComponentRegistryToPanels() {
+  try {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceFolder) return;
+    const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+    if (!fs.existsSync(registryPath)) return;
+    const raw = fs.readFileSync(registryPath, 'utf8');
+    const registry = JSON.parse(raw || '{}');
+    // Post to Activity view 'library' using the provider's own webview instance
+    try {
+      const mappedLib: any = {};
+      for (const key of Object.keys(registry)) {
+        try {
+          const entry = registry[key];
+          const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+          const fileUri = vscode.Uri.file(filePath);
+          // For library we don't have a panel reference but the AggoComponentLibraryProvider has a static instance that can post back
+            mappedLib[key] = { ...entry, file: entry.file };
+        } catch (err) { console.warn('[aggo] failed mapping registry entry for broadcast to library', err); }
+      }
+      AggoComponentLibraryProvider.postMessageToWebview({ type: 'componentCatalogUpdated', registry: mappedLib });
+    } catch (err) { /* ignore */ }
+
+    // Post to page editor and property view panels (webview panels)
+    try {
+      const mappedPanels: any = {};
+      for (const key of Object.keys(registry)) {
+        try {
+          const entry = registry[key];
+          const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+          mappedPanels[key] = { ...entry, file: filePath };
+        } catch (err) { console.warn('[aggo] failed mapping registry entry for broadcast to panels', err); }
+      }
+      const pagePanel = getPanelByViewType('aggo.pageEditor');
+      if (pagePanel) {
+        const mappedForPage: any = {};
+        for (const key of Object.keys(registry)) {
+          try {
+            const entry = registry[key];
+            const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+            const fileUri = vscode.Uri.file(filePath);
+            const webUri = pagePanel.webview.asWebviewUri(fileUri).toString();
+            mappedForPage[key] = { ...entry, file: webUri };
+          } catch (err) { console.warn('[aggo] failed mapping registry entry for page panel broadcast', err); }
+        }
+        pagePanel.webview.postMessage({ type: 'componentCatalogUpdated', registry: mappedForPage });
+      }
+      // properties view doesn't need webview as a resource; provide raw mapped file paths
+      AggoPropertyViewProvider.postMessageToWebview({ type: 'componentCatalogUpdated', registry: mappedPanels });
+    } catch (err) { console.warn('[aggo] failed broadcasting registry to page/editor/property panels', err); }
+  } catch (err) { console.warn('[aggo] failed to broadcast component registry', err); }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   try {
     console.log('Aggo Builder extension activating.');
@@ -166,6 +220,47 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (e) {
         console.warn('[aggo] insertComponent: no active page editor to receive insert', e);
       }
+  }));
+
+  // Register command to install component JS bundles into workspace component library
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.installComponent', async () => {
+    try {
+      const picked = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'JavaScript': ['js'] } });
+      if (!picked || picked.length === 0) return;
+      const fileUri = picked[0];
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace found to install component in.');
+        return;
+      }
+      const componentsDir = path.join(workspaceFolder, '.aggo', 'components');
+      await fs.promises.mkdir(componentsDir, { recursive: true });
+      const destPath = path.join(componentsDir, path.basename(fileUri.fsPath));
+      await fs.promises.copyFile(fileUri.fsPath, destPath);
+      // Prompt for component id and name
+      const defaultId = path.basename(fileUri.fsPath, '.js');
+      const componentId = await vscode.window.showInputBox({ prompt: 'Component ID', value: defaultId });
+      if (!componentId) return;
+      const componentName = await vscode.window.showInputBox({ prompt: 'Display name for component', value: defaultId });
+      // Update registry
+      const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+      let registry: any = {};
+      if (fs.existsSync(registryPath)) {
+        const raw = await fs.promises.readFile(registryPath, 'utf8');
+        try { registry = JSON.parse(raw || '{}'); } catch (err) { registry = {}; }
+      }
+      const rel = './.aggo/components/' + path.basename(destPath);
+      registry[componentId] = { id: componentId, name: componentName || componentId, category: 'Plugin', icon: '', file: rel };
+      await fs.promises.writeFile(registryPath, JSON.stringify(registry, null, 2), 'utf8');
+      vscode.window.showInformationMessage(`Installed component ${componentId} to ${rel}`);
+      // Immediately broadcast registry updates to any open panels
+      setTimeout(() => { broadcastComponentRegistryToPanels(); }, 50);
+      // Trigger a filesystem event to notify watchers
+      // (watchers in providers will pick this up automatically)
+    } catch (err: any) {
+      console.error('[aggo] failed to install component', err);
+      vscode.window.showErrorMessage(`Failed to install component: ${err?.message || String(err)}`);
+    }
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('aggo.updateElement', (element) => {
@@ -365,6 +460,56 @@ export function activate(context: vscode.ExtensionContext) {
     console.error('Failed to register Aggo view providers', err);
     try { vscode.window.showErrorMessage(`Aggo: failed to register activity views: ${err?.message || String(err)}`); } catch (_) { }
   }
+  // Create a workspace-level watcher for the component library and broadcast on changes
+  try {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspaceFolder) {
+      const pattern = new vscode.RelativePattern(workspaceFolder, '.aggo/components/**');
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      const handler = async (uri?: vscode.Uri, eventType: 'create' | 'change' | 'delete' = 'change') => {
+        try {
+          if (!uri) { setTimeout(() => { broadcastComponentRegistryToPanels(); }, 20); return; }
+          const fsPath = uri.fsPath;
+          const basename = path.basename(fsPath);
+          const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+          if (basename === 'component_registry.json') { setTimeout(() => { broadcastComponentRegistryToPanels(); }, 20); return; }
+          if (!fsPath.toLowerCase().endsWith('.js')) { setTimeout(() => { broadcastComponentRegistryToPanels(); }, 20); return; }
+
+          let registry: any = {};
+          if (fs.existsSync(registryPath)) {
+            try { registry = JSON.parse(fs.readFileSync(registryPath, 'utf8') || '{}'); } catch (e) { registry = {}; }
+          }
+
+          if (eventType === 'delete') {
+            const basenameJs = './.aggo/components/' + basename;
+            let changed = false;
+            for (const k of Object.keys(registry)) {
+              const entryFile = registry[k] && registry[k].file;
+              if (!entryFile) continue;
+              const possiblePaths = [entryFile, path.join(workspaceFolder, entryFile), path.resolve(workspaceFolder, entryFile)];
+              if (possiblePaths.includes(fsPath) || possiblePaths.includes(basenameJs)) { delete registry[k]; changed = true; }
+            }
+            if (changed) { await fs.promises.writeFile(registryPath, JSON.stringify(registry, null, 2), 'utf8'); }
+          } else {
+            const id = path.basename(fsPath, '.js');
+            const rel = './.aggo/components/' + basename;
+            if (!registry[id]) {
+              registry[id] = { id, name: id, category: 'Plugin', icon: '', file: rel };
+              await fs.promises.mkdir(path.dirname(registryPath), { recursive: true });
+              await fs.promises.writeFile(registryPath, JSON.stringify(registry, null, 2), 'utf8');
+            }
+          }
+          setTimeout(() => { broadcastComponentRegistryToPanels(); }, 20);
+        } catch (err) { console.warn('[aggo] workspace component watcher handler failed', err); }
+      };
+      watcher.onDidCreate((u) => handler(u, 'create'));
+      watcher.onDidChange((u) => handler(u, 'change'));
+      watcher.onDidDelete((u) => handler(u, 'delete'));
+      context.subscriptions.push(watcher);
+      // Don't broadcast on activate - let each webview load registry when it sends 'ready' message
+      // This ensures proper timing and avoids race conditions
+    }
+  } catch (err) { console.warn('[aggo] failed to register workspace components watcher', err); }
   
   } catch (err: any) {
     console.error('Aggo activation error:', err);

@@ -1,15 +1,44 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { getHtmlForWebview } from '../utils/webviewHelper';
 import { normalizeBridgeContent } from '../utils/fileBridge';
 
 export class AggoComponentLibraryProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'aggo.library';
+  private static _instance?: AggoComponentLibraryProvider;
+  private _view?: vscode.WebviewView;
   constructor(private readonly extensionUri: vscode.Uri, private readonly isDev: boolean = false) { }
 
+  public static postMessageToWebview(message: any) {
+    if (AggoComponentLibraryProvider._instance && AggoComponentLibraryProvider._instance._view) {
+      // If registry message is sent, map file paths to webview URIs using this _view
+      if (message && message.type === 'componentCatalogUpdated' && message.registry) {
+        try {
+          const mapped: any = {};
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          for (const key of Object.keys(message.registry)) {
+            try {
+              const entry = message.registry[key];
+              const filePath = entry.file && entry.file.startsWith('.') && workspaceFolder ? path.join(workspaceFolder, entry.file) : entry.file;
+              const fileUri = vscode.Uri.file(filePath);
+              const webUri = AggoComponentLibraryProvider._instance!._view!.webview.asWebviewUri(fileUri).toString();
+              mapped[key] = { ...entry, file: webUri };
+            } catch (err) { console.warn('[aggo] failed mapping registry entry for library provider', err); }
+          }
+          AggoComponentLibraryProvider._instance._view.webview.postMessage({ ...message, registry: mapped });
+          return;
+        } catch (err) { console.warn('[aggo] failed to post mapped registry to library', err); }
+      }
+      AggoComponentLibraryProvider._instance._view.webview.postMessage(message);
+    }
+  }
+
   public resolveWebviewView(webviewView: vscode.WebviewView) {
+    AggoComponentLibraryProvider._instance = this;
+    this._view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.extensionUri]
@@ -125,6 +154,33 @@ export class AggoComponentLibraryProvider implements vscode.WebviewViewProvider 
       this.isDev
     );
 
+    // Load component registry and send it to the view when ready
+    const sendRegistry = async () => {
+      try {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceFolder) return;
+        const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+        if (!fs.existsSync(registryPath)) return;
+        const raw = fs.readFileSync(registryPath, 'utf8');
+        const registry = JSON.parse(raw || '{}');
+        // Map file references to webview URIs
+        const mapped: any = {};
+        for (const key of Object.keys(registry)) {
+          try {
+            const entry = registry[key];
+            const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+            const fileUri = vscode.Uri.file(filePath);
+            const webUri = webviewView.webview.asWebviewUri(fileUri).toString();
+            mapped[key] = { ...entry, file: webUri };
+          } catch (err) { console.warn('[aggo] failed mapping registry entry', err); }
+        }
+        webviewView.webview.postMessage({ type: 'componentCatalogUpdated', registry: mapped });
+      } catch (err) { console.warn('[aggo] failed to send component registry', err); }
+    };
+
+    // NOTE: Centralized watcher exists in extension.ts; keep provider lightweight and rely on broadcastComponentRegistry
+    let watcher: vscode.FileSystemWatcher | undefined;
+
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (await handleFileBridgeCommand(message)) {
         return;
@@ -134,6 +190,9 @@ export class AggoComponentLibraryProvider implements vscode.WebviewViewProvider 
           type: 'init',
           viewType: AggoComponentLibraryProvider.viewType
         });
+      } else if (message.type === 'libraryReady') {
+        // Library component mounted, now send registry
+        await sendRegistry();
       } else if (message.type === 'addComponent') {
         // Broadcast to active editor via a command or event
         // For now, let's try to find the active custom editor. 
@@ -141,6 +200,9 @@ export class AggoComponentLibraryProvider implements vscode.WebviewViewProvider 
         // Let's assume we register a command 'aggo.insertComponent' in extension.ts
         vscode.commands.executeCommand('aggo.insertComponent', message.data);
       }
+    });
+    webviewView.onDidDispose(() => {
+      try { watcher?.dispose(); } catch (e) { /* ignore */ }
     });
   }
 }

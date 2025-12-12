@@ -1,0 +1,12 @@
+{
+  "name": "@aggo/hello-plugin",
+  "version": "0.0.1",
+  "description": "Hello world plugin example for Aggo editor",
+  "main": "dist/hello-plugin.js",
+  "scripts": {
+    "build": "echo 'No build: dist/hello-plugin.js is prebuilt'",
+    "pack": "mkdir -p dist && cp -f dist/hello-plugin.js dist/hello-plugin.js"
+  },
+  "keywords": ["aggo", "plugin", "example"],
+  "license": "MIT"
+}

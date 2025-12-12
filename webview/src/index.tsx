@@ -33,6 +33,8 @@ const App: React.FC = () => {
   const [builderError, setBuilderError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    // Expose React and ReactDOM globally for plugin artifacts that rely on window.React
+    try { (window as any).React = React; (window as any).ReactDOM = ReactDOM; } catch (err) { /* ignore */ }
     const handler = (ev: MessageEvent) => {
       const data = ev.data as InitMessage;
       if (data?.type === 'init') {
