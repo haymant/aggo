@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { vscode } from "../utils/vscode";
+import builtins from '../../../packages/core/dist';
 
 type ElementData = {
   id: string;
@@ -239,6 +240,61 @@ export const Properties: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"props" | "styles">("props");
   const [element, setElement] = useState<ElementData | null>(null);
   const [pluginRegistry, setPluginRegistry] = useState<Record<string, any>>({});
+  const loadedScriptsRef = useRef<Record<string, 'pending' | 'loaded' | 'failed'>>({});
+  const pluginRegistryRef = useRef<Record<string, any>>({});
+  const requestedComponentRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    pluginRegistryRef.current = pluginRegistry || {};
+  }, [pluginRegistry]);
+
+  const ensurePluginLoaded = (componentId: string) => {
+    try {
+      if (!componentId) return;
+      if ((window as any).__aggo_plugins__?.[componentId]) return;
+      const regEntry = pluginRegistryRef.current?.[componentId];
+      const url = regEntry?.file as string | undefined;
+      if (!url) {
+        // Ask the extension host to send us the registry entry for this component id
+        if (!requestedComponentRef.current[componentId]) {
+          requestedComponentRef.current[componentId] = true;
+          try { vscode.postMessage({ type: 'requestComponent', id: componentId }); } catch (_) { /* ignore */ }
+        }
+        return;
+      }
+      const status = loadedScriptsRef.current[url];
+      if (status === 'pending' || status === 'loaded') return;
+
+      const s = document.createElement('script');
+      try {
+        const nonce = (window as any).__aggo_nonce__ as string | undefined;
+        if (nonce) (s as any).nonce = nonce;
+      } catch (_) { /* ignore */ }
+      s.src = url;
+      s.async = true;
+      loadedScriptsRef.current[url] = 'pending';
+      s.onload = () => {
+        loadedScriptsRef.current[url] = 'loaded';
+        // Trigger a re-render so schema-based fields appear
+        setElement((cur) => (cur ? { ...cur } : cur));
+      };
+      s.onerror = (err) => {
+        console.warn('[Properties] failed to load plugin script', url, err);
+        loadedScriptsRef.current[url] = 'failed';
+      };
+      document.head.appendChild(s);
+      // Some CSP failures don't reliably trigger onerror; clear pending if not registered soon.
+      setTimeout(() => {
+        try {
+          if (!(window as any).__aggo_plugins__?.[componentId] && loadedScriptsRef.current[url] === 'pending') {
+            loadedScriptsRef.current[url] = 'failed';
+          }
+        } catch (_) { /* ignore */ }
+      }, 1500);
+    } catch (_) {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
@@ -246,7 +302,26 @@ export const Properties: React.FC = () => {
       if (msg.type === "selectionChanged") {
         setElement(msg.element);
       } else if (msg.type === 'componentCatalogUpdated') {
-        try { setPluginRegistry(msg.registry || {}); } catch (err) { console.warn('[aggo properties] invalid registry', err); }
+        try {
+          const registry = msg.registry || {};
+          setPluginRegistry((prev) => {
+            const next = { ...(prev || {}), ...(registry || {}) };
+            pluginRegistryRef.current = next;
+            return next;
+          });
+          // Load plugin artifacts into the Properties webview so schemas are available
+          for (const key of Object.keys(registry)) {
+            const entry = registry[key];
+            const url = entry?.file as string | undefined;
+            if (!url) continue;
+            // If plugin already registered on window, skip
+            if ((window as any).__aggo_plugins__ && (window as any).__aggo_plugins__[key]) continue;
+            // Attempt load; ensurePluginLoaded handles dedupe + retry safety
+            ensurePluginLoaded(key);
+          }
+        } catch (err) {
+          console.warn('[aggo properties] invalid registry', err);
+        }
       } else if (msg.type === "update") {
         // Handle updates from extension if needed
       }
@@ -360,9 +435,24 @@ export const Properties: React.FC = () => {
               />
             </div>
             {/* Plugin props section */}
-            {element?.attributes && (element.attributes as any)['data-component'] && (() => {
-              const cid = (element.attributes as any)['data-component'] as string;
-              const entry = pluginRegistry[cid];
+            {(() => {
+              // Determine the schema entry for either a plugin component or a built-in
+              let entry: any = undefined;
+              if (element?.attributes && (element.attributes as any)['data-component']) {
+                const cid = (element.attributes as any)['data-component'] as string;
+                // Prefer the loaded plugin's registration (includes schema)
+                entry = (window as any).__aggo_plugins__?.[cid];
+                if (!entry) {
+                  // If we don't have registry info yet, ask the host for it.
+                  if (!pluginRegistryRef.current || Object.keys(pluginRegistryRef.current).length === 0) {
+                    try { vscode.postMessage({ type: 'requestComponentRegistry' }); } catch (_) { /* ignore */ }
+                  }
+                  ensurePluginLoaded(cid);
+                }
+              }
+              if (!entry && element?.tagName) {
+                entry = (builtins as any)[element.tagName] || (builtins as any)[String(element.tagName).toLowerCase()];
+              }
               if (!entry || !entry.schema) return <></>;
               const propsSchema = (entry.schema as any).properties || {};
               return (
@@ -371,10 +461,11 @@ export const Properties: React.FC = () => {
                   {Object.keys(propsSchema).map((p) => {
                     const def = propsSchema[p];
                     if (def.type === 'string') {
+                      const currentValue = ((element.attributes as any)?.[p] ?? def.default ?? '') as string;
                       return (
                         <div key={p} className="space-y-1">
                           <label className="text-xs text-muted-foreground">{def.title || p}</label>
-                          <input type="text" className="w-full p-1 text-xs bg-background border border-input rounded" value={(element.attributes as any)[p] || ''} onChange={(e) => updateAttr(p, e.target.value)} />
+                          <input type="text" className="w-full p-1 text-xs bg-background border border-input rounded" value={currentValue} onChange={(e) => updateAttr(p, e.target.value)} />
                         </div>
                       );
                     }

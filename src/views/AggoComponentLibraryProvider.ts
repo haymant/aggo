@@ -24,7 +24,13 @@ export class AggoComponentLibraryProvider implements vscode.WebviewViewProvider 
               const entry = message.registry[key];
               const filePath = entry.file && entry.file.startsWith('.') && workspaceFolder ? path.join(workspaceFolder, entry.file) : entry.file;
               const fileUri = vscode.Uri.file(filePath);
-              const webUri = AggoComponentLibraryProvider._instance!._view!.webview.asWebviewUri(fileUri).toString();
+              let webUri = AggoComponentLibraryProvider._instance!._view!.webview.asWebviewUri(fileUri).toString();
+              try {
+                const mtimeMs = fs.statSync(filePath).mtimeMs;
+                if (Number.isFinite(mtimeMs)) {
+                  webUri = `${webUri}${webUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+                }
+              } catch (_) { /* ignore */ }
               mapped[key] = { ...entry, file: webUri };
             } catch (err) { console.warn('[aggo] failed mapping registry entry for library provider', err); }
           }
@@ -39,9 +45,10 @@ export class AggoComponentLibraryProvider implements vscode.WebviewViewProvider 
   public resolveWebviewView(webviewView: vscode.WebviewView) {
     AggoComponentLibraryProvider._instance = this;
     this._view = webviewView;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.extensionUri]
+      localResourceRoots: workspaceRoot ? [this.extensionUri, workspaceRoot] : [this.extensionUri]
     };
 
     const fetchRemoteText = async (url: string): Promise<string> => {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { vscode } from '../utils/vscode';
-import { SquarePen, Eye } from 'lucide-react';
+import { SquarePen, Eye, ZoomIn, ZoomOut, RefreshCw } from 'lucide-react';
 
 interface PageElement {
   id: string;
@@ -73,6 +73,48 @@ const ElementRenderer: React.FC<{
           try { vscode.postMessage({ type: 'updateElement', element: updated }); } catch (err) { /* noop */ }
         }
       };
+
+      // Important: keep the element selectable/draggable even if the plugin component
+      // doesn't wire click handlers. In edit mode we wrap it with the standard handlers.
+      if (editMode) {
+        const wrapperStyle = { ...(style || {}), position: (style as any)?.position || 'relative' } as any;
+        const wrapperProps: any = {
+          style: wrapperStyle,
+          ...element.attributes,
+          id: element.id,
+          draggable: editMode,
+          onDragStart: (e: React.DragEvent) => onDragStart(element, e),
+          onDragEnd: (e: React.DragEvent) => onDragEnd?.(e),
+          onDragOver: (e: React.DragEvent) => onDragOverElem(element, e),
+          onDrop: (e: React.DragEvent) => onDropElem(element, e),
+          // Use capture so selection works even if plugin stops propagation.
+          onPointerDownCapture: (e: React.PointerEvent) => {
+            try { e.stopPropagation(); } catch (_) { /* ignore */ }
+            onSelect(element);
+          },
+          // Also stop click at capture to avoid the canvas background click handler
+          // immediately clearing selection when plugin content doesn't forward clicks.
+          onClickCapture: (e: React.MouseEvent) => {
+            if (!editMode) return;
+            try { e.stopPropagation(); } catch (_) { /* ignore */ }
+            try { e.preventDefault(); } catch (_) { /* ignore */ }
+            onSelect(element);
+          },
+          onClick: handleClick,
+          onKeyDown: handleKeyDown,
+          tabIndex: editMode ? 0 : -1,
+          ref: (el: HTMLElement | null) => { ref.current = el; }
+        };
+        const overlay = isSelected ? React.createElement('div', { style: { position: 'absolute', inset: 0, border: '2px solid #3b82f6', pointerEvents: 'none', borderRadius: '4px', boxSizing: 'border-box' } }) : null;
+        return React.createElement(
+          element.tagName,
+          wrapperProps,
+          React.createElement(plugin.Component, pluginProps),
+          overlay
+        );
+      }
+
+      // In preview mode, render the plugin directly to avoid introducing extra DOM wrappers.
       return React.createElement(plugin.Component, pluginProps);
     }
   }
@@ -211,13 +253,15 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<null | { left:number; top:number; width:number; height:number; type: 'vertical' | 'horizontal' }>(null);
   const [dropMeta, setDropMeta] = useState<null | { parentId: string | null; index: number }>(null);
+  const [zoom, setZoom] = useState<number>(1);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Refs for stable access in event listeners
   const dataRef = useRef(data);
   const selectedIdRef = useRef(selectedId);
   const [pluginRegistry, setPluginRegistry] = useState<Record<string, any>>({});
-  const loadedScriptsRef = useRef<Record<string, boolean>>({});
+  const [, setPluginLoadTick] = useState(0);
+  const loadedScriptsRef = useRef<Record<string, 'pending' | 'loaded' | 'failed'>>({});
 
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
@@ -336,6 +380,18 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
     if (!node.children) return null;
     for (const c of node.children) {
       const r = findById(c, id);
+      if (r) return r;
+    }
+    return null;
+  }, []);
+
+  const findPathToId = useCallback((node: PageElement, id: string, acc: PageElement[] = []): PageElement[] | null => {
+    if (!node) return null;
+    const next = [...acc, node];
+    if (node.id === id) return next;
+    if (!node.children) return null;
+    for (const c of node.children) {
+      const r = findPathToId(c, id, next);
       if (r) return r;
     }
     return null;
@@ -481,20 +537,44 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
               if ((window as any).__aggo_plugins__ && (window as any).__aggo_plugins__[key]) continue;
               const url = entry.file as string;
               if (!url) continue;
-              if (loadedScriptsRef.current[url]) continue;
+              const status = loadedScriptsRef.current[url];
+              if (status === 'pending' || status === 'loaded') continue;
               const s = document.createElement('script');
+              try {
+                const nonce = (window as any).__aggo_nonce__ as string | undefined;
+                if (nonce) (s as any).nonce = nonce;
+              } catch (_) { /* ignore */ }
               s.src = url;
               s.async = true;
-              s.onload = () => { loadedScriptsRef.current[url] = true; console.debug('[PageCanvas] loaded plugin', key); };
-              s.onerror = (err) => { console.warn('[PageCanvas] failed to load plugin script', url, err); loadedScriptsRef.current[url] = false; };
+              loadedScriptsRef.current[url] = 'pending';
+              s.onload = () => {
+                loadedScriptsRef.current[url] = 'loaded';
+                // Force a React re-render so any <plugin data-component="..."> nodes
+                // can resolve to the newly registered plugin component.
+                setPluginLoadTick((t) => t + 1);
+                console.debug('[PageCanvas] loaded plugin', key);
+              };
+              s.onerror = (err) => { console.warn('[PageCanvas] failed to load plugin script', url, err); loadedScriptsRef.current[url] = 'failed'; };
               document.head.appendChild(s);
-              loadedScriptsRef.current[url] = true;
+              // Some CSP failures don't reliably trigger onerror; clear pending if not registered soon.
+              setTimeout(() => {
+                try {
+                  if (!(window as any).__aggo_plugins__?.[key] && loadedScriptsRef.current[url] === 'pending') {
+                    loadedScriptsRef.current[url] = 'failed';
+                  }
+                } catch (_) { /* ignore */ }
+              }, 1500);
             } catch (err) { console.warn('[PageCanvas] failed to append plugin script', err); }
           }
         } catch (err) { console.warn('[PageCanvas] failed handling componentCatalogUpdated msg', err); }
       }
     };
     window.addEventListener('message', handler);
+
+    // On reload, the host may post the initial registry before our listener is attached.
+    // Request it explicitly once we're ready to receive it.
+    try { vscode.postMessage({ type: 'requestComponentRegistry' }); } catch (_) { /* ignore */ }
+
     return () => window.removeEventListener('message', handler);
   }, [onChange, mergeElementTree, addComponent]);
 
@@ -680,37 +760,94 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({ data, onChange }) => {
     return <div>Initializing...</div>;
   }
 
+  const breadcrumbPath = selectedId ? (data && isPageData(data) ? findPathToId(data as PageElement, selectedId) || [] : []) : [];
+  const zoomIn = () => setZoom(z => Math.min(2, +(z + 0.1).toFixed(2)));
+  const zoomOut = () => setZoom(z => Math.max(0.2, +(z - 0.1).toFixed(2)));
+  const resetZoom = () => setZoom(1);
+
   return (
     <div 
-      className="h-full w-full bg-gray-100 dark:bg-gray-900 overflow-auto"
+      className="w-full bg-gray-100 dark:bg-gray-900 overflow-auto"
+      style={{ height: '100vh' }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onClick={() => { if (!editMode) return; setSelectedId(null); vscode.postMessage({ type: 'selectionChanged', element: null }); }}
       ref={rootRef}
     >
       <div style={{ position: 'absolute', right: 8, top: 0, zIndex: 80, pointerEvents: 'auto' }}>
-        <button
-          onClick={() => setEditMode(v => !v)}
-          className="aggo-toolbar flex items-center justify-center p-0"
-          style={{
-            backgroundColor: editMode ? '#374151' : '#f3f4f6',
-            color: editMode ? '#ffffff' : '#111827',
-            padding: 0,
-            width: 36,
-            height: 36,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          aria-pressed={editMode}
-          title={editMode ? 'Switch to Preview Mode' : 'Switch to Edit Mode'}
-          aria-label={editMode ? 'Edit mode currently active; switch to preview' : 'Preview mode currently active; switch to edit'}
-        >
-          {editMode ? <SquarePen className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
-        </button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            onClick={zoomOut}
+            className="aggo-toolbar flex items-center justify-center p-0"
+            style={{ width: 32, height: 32, borderRadius: 4, backgroundColor: '#ffffff' }}
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            <ZoomOut className="h-4 w-4" aria-hidden />
+          </button>
+          <div style={{ fontSize: 12, minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</div>
+          <button
+            onClick={zoomIn}
+            className="aggo-toolbar flex items-center justify-center p-0"
+            style={{ width: 32, height: 32, borderRadius: 4, backgroundColor: '#ffffff' }}
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            <ZoomIn className="h-4 w-4" aria-hidden />
+          </button>
+          <button
+            onClick={resetZoom}
+            className="aggo-toolbar flex items-center justify-center p-0"
+            style={{ width: 32, height: 32, borderRadius: 4, backgroundColor: '#ffffff' }}
+            title="Reset zoom"
+            aria-label="Reset zoom"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden />
+          </button>
+          <button
+            onClick={() => setEditMode(v => !v)}
+            className="aggo-toolbar flex items-center justify-center p-0"
+            style={{
+              backgroundColor: editMode ? '#374151' : '#f3f4f6',
+              color: editMode ? '#ffffff' : '#111827',
+              padding: 0,
+              width: 36,
+              height: 36,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            aria-pressed={editMode}
+            title={editMode ? 'Switch to Preview Mode' : 'Switch to Edit Mode'}
+            aria-label={editMode ? 'Edit mode currently active; switch to preview' : 'Preview mode currently active; switch to edit'}
+          >
+            {editMode ? <SquarePen className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+          </button>
+        </div>
       </div>
-      <div className="min-h-full shadow-sm mx-auto bg-white" style={{ maxWidth: '100%' }}>
-        <ElementRenderer element={data} selectedId={selectedId} editMode={editMode} draggingId={draggingId} onSelect={handleSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOverElem={onDragOverElem} onDropElem={onDropElem} onTabNext={handleTabNext} />
+      <div style={{ position: 'absolute', left: 8, top: 8, zIndex: 90 }}>
+        {breadcrumbPath && breadcrumbPath.length > 0 ? (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {breadcrumbPath.map((b, idx) => (
+              <button
+                key={b.id}
+                onClick={() => { setSelectedId(b.id); vscode.postMessage({ type: 'selectionChanged', element: b }); }}
+                className="px-2 py-0 text-xs border border-border rounded bg-background hover:bg-accent"
+                title={`${b.tagName} (${b.id})`}
+              >
+                {b.tagName}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">No selection</div>
+        )}
+      </div>
+
+      <div className="shadow-sm mx-auto bg-white" style={{ maxWidth: '100%', minHeight: '100vh' }}>
+        <div style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
+          <ElementRenderer element={data} selectedId={selectedId} editMode={editMode} draggingId={draggingId} onSelect={handleSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOverElem={onDragOverElem} onDropElem={onDropElem} onTabNext={handleTabNext} />
+        </div>
       </div>
       {dropIndicator && (
         <div style={{ position: 'absolute', left: dropIndicator.left, top: dropIndicator.top, width: dropIndicator.width, height: dropIndicator.height, background: '#3b82f6', zIndex: 50, pointerEvents: 'none' }} />

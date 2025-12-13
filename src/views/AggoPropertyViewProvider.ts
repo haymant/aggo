@@ -17,15 +17,54 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
 
   public static postMessageToWebview(message: any) {
     if (AggoPropertyViewProvider._instance && AggoPropertyViewProvider._instance._view) {
-      AggoPropertyViewProvider._instance._view.webview.postMessage(message);
+      const view = AggoPropertyViewProvider._instance._view;
+      // If we're broadcasting a component registry, ensure file URIs are mapped for THIS webview.
+      try {
+        if (message?.type === 'componentCatalogUpdated' && message?.registry && typeof message.registry === 'object') {
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          const mapped: any = {};
+          for (const key of Object.keys(message.registry)) {
+            const entry = message.registry[key];
+            if (!entry) continue;
+            const file = entry.file as string | undefined;
+            if (!file) {
+              mapped[key] = entry;
+              continue;
+            }
+
+            // If it's already a webview/remote URI, pass through as-is.
+            if (/^(vscode-webview-resource:|vscode-resource:|https?:)/i.test(file)) {
+              mapped[key] = entry;
+              continue;
+            }
+
+            const resolvedPath = file.startsWith('.') && workspaceFolder ? path.join(workspaceFolder, file) : (workspaceFolder && !path.isAbsolute(file) ? path.join(workspaceFolder, file) : file);
+            const fileUri = vscode.Uri.file(resolvedPath);
+            let webUri = view.webview.asWebviewUri(fileUri).toString();
+            try {
+              const mtimeMs = fs.statSync(resolvedPath).mtimeMs;
+              if (Number.isFinite(mtimeMs)) {
+                webUri = `${webUri}${webUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+              }
+            } catch (_) { /* ignore */ }
+            mapped[key] = { ...entry, file: webUri };
+          }
+          view.webview.postMessage({ ...message, registry: mapped });
+          return;
+        }
+      } catch (err) {
+        console.warn('[aggo] failed to map registry for property view postMessage', err);
+      }
+      view.webview.postMessage(message);
     }
   }
 
   public resolveWebviewView(webviewView: vscode.WebviewView) {
     this._view = webviewView;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.extensionUri]
+      localResourceRoots: workspaceRoot ? [this.extensionUri, workspaceRoot] : [this.extensionUri]
     };
 
     const fetchRemoteText = async (url: string): Promise<string> => {
@@ -138,6 +177,41 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
       this.isDev
     );
 
+    const loadMappedRegistry = async (onlyIds?: string[]) => {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceFolder) return {};
+      const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+      if (!fs.existsSync(registryPath)) return {};
+      let registry: any = {};
+      try {
+        const raw = fs.readFileSync(registryPath, 'utf8');
+        registry = JSON.parse(raw || '{}');
+      } catch {
+        registry = {};
+      }
+      const mapped: any = {};
+      const keys = onlyIds && onlyIds.length > 0 ? onlyIds : Object.keys(registry);
+      for (const key of keys) {
+        try {
+          const entry = registry[key];
+          if (!entry) continue;
+          const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
+          const fileUri = vscode.Uri.file(filePath);
+          let webUri = webviewView.webview.asWebviewUri(fileUri).toString();
+          try {
+            const mtimeMs = fs.statSync(filePath).mtimeMs;
+            if (Number.isFinite(mtimeMs)) {
+              webUri = `${webUri}${webUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+            }
+          } catch (_) { /* ignore */ }
+          mapped[key] = { ...entry, file: webUri };
+        } catch (err) {
+          console.warn('[aggo] failed mapping registry entry for property view', err);
+        }
+      }
+      return mapped;
+    };
+
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (await handleFileBridgeCommand(message)) {
         return;
@@ -149,24 +223,31 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
         });
         // send initial component registry if present
         try {
-          const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (!workspaceFolder) return;
-          const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
-          if (!fs.existsSync(registryPath)) return;
-          const raw = fs.readFileSync(registryPath, 'utf8');
-          const registry = JSON.parse(raw || '{}');
-          const mapped: any = {};
-          for (const key of Object.keys(registry)) {
-            try {
-              const entry = registry[key];
-              const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
-              const fileUri = vscode.Uri.file(filePath);
-              const webUri = webviewView.webview.asWebviewUri(fileUri).toString();
-              mapped[key] = { ...entry, file: webUri };
-            } catch (err) { console.warn('[aggo] failed mapping registry entry for property view', err); }
+          const mapped = await loadMappedRegistry();
+          if (Object.keys(mapped).length > 0) {
+            webviewView.webview.postMessage({ type: 'componentCatalogUpdated', registry: mapped });
           }
+        } catch (err) {
+          console.warn('[aggo] failed to load registry for property view', err);
+        }
+      } else if (message.type === 'requestComponentRegistry') {
+        try {
+          const mapped = await loadMappedRegistry();
           webviewView.webview.postMessage({ type: 'componentCatalogUpdated', registry: mapped });
-        } catch (err) { console.warn('[aggo] failed to load registry for property view', err); }
+        } catch (err) {
+          console.warn('[aggo] failed to handle requestComponentRegistry', err);
+        }
+      } else if (message.type === 'requestComponent') {
+        try {
+          const id = message?.id as string | undefined;
+          if (!id) return;
+          const mapped = await loadMappedRegistry([id]);
+          if (Object.keys(mapped).length > 0) {
+            webviewView.webview.postMessage({ type: 'componentCatalogUpdated', registry: mapped });
+          }
+        } catch (err) {
+          console.warn('[aggo] failed to handle requestComponent', err);
+        }
       } else if (message.type === 'updateElement') {
         vscode.commands.executeCommand('aggo.updateElement', message.element);
       }

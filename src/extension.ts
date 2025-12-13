@@ -57,7 +57,13 @@ async function broadcastComponentRegistryToPanels() {
             const entry = registry[key];
             const filePath = entry.file && entry.file.startsWith('.') ? path.join(workspaceFolder, entry.file) : entry.file;
             const fileUri = vscode.Uri.file(filePath);
-            const webUri = pagePanel.webview.asWebviewUri(fileUri).toString();
+            let webUri = pagePanel.webview.asWebviewUri(fileUri).toString();
+            try {
+              const mtimeMs = fs.statSync(filePath).mtimeMs;
+              if (Number.isFinite(mtimeMs)) {
+                webUri = `${webUri}${webUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+              }
+            } catch (_) { /* ignore */ }
             mappedForPage[key] = { ...entry, file: webUri };
           } catch (err) { console.warn('[aggo] failed mapping registry entry for page panel broadcast', err); }
         }
@@ -260,6 +266,74 @@ export function activate(context: vscode.ExtensionContext) {
     } catch (err: any) {
       console.error('[aggo] failed to install component', err);
       vscode.window.showErrorMessage(`Failed to install component: ${err?.message || String(err)}`);
+    }
+  }));
+
+  // Register command to uninstall a previously installed component
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.uninstallComponent', async () => {
+    try {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace found.');
+        return;
+      }
+      const registryPath = path.join(workspaceFolder, '.aggo', 'components', 'component_registry.json');
+      if (!fs.existsSync(registryPath)) {
+        vscode.window.showInformationMessage('No installed components found (.aggo/components/component_registry.json missing).');
+        return;
+      }
+      let registry: any = {};
+      try {
+        const raw = await fs.promises.readFile(registryPath, 'utf8');
+        registry = JSON.parse(raw || '{}');
+      } catch {
+        registry = {};
+      }
+      const ids = Object.keys(registry);
+      if (ids.length === 0) {
+        vscode.window.showInformationMessage('No installed components found.');
+        return;
+      }
+
+      const items = ids.map((id) => {
+        const e = registry[id] || {};
+        return {
+          label: e.name ? `${e.name}` : id,
+          description: id,
+          detail: e.file ? String(e.file) : ''
+        };
+      });
+      const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select a component to uninstall' });
+      if (!picked) return;
+      const componentId = picked.description;
+      if (!componentId || !registry[componentId]) return;
+      const entry = registry[componentId];
+      const relFile = entry?.file as string | undefined;
+
+      // Remove the registry entry first
+      delete registry[componentId];
+      await fs.promises.writeFile(registryPath, JSON.stringify(registry, null, 2), 'utf8');
+
+      // Remove copied file if it isn't referenced by any remaining component
+      if (relFile && typeof relFile === 'string') {
+        const stillReferenced = Object.keys(registry).some((k) => registry[k]?.file === relFile);
+        if (!stillReferenced) {
+          try {
+            const targetPath = relFile.startsWith('./') ? path.join(workspaceFolder, relFile.replace(/^\.\//, '')) : relFile;
+            if (targetPath.startsWith(workspaceFolder) && fs.existsSync(targetPath)) {
+              await fs.promises.unlink(targetPath);
+            }
+          } catch (err) {
+            console.warn('[aggo] failed to delete component file during uninstall', err);
+          }
+        }
+      }
+
+      vscode.window.showInformationMessage(`Uninstalled component ${componentId}`);
+      setTimeout(() => { broadcastComponentRegistryToPanels(); }, 50);
+    } catch (err: any) {
+      console.error('[aggo] failed to uninstall component', err);
+      vscode.window.showErrorMessage(`Failed to uninstall component: ${err?.message || String(err)}`);
     }
   }));
 

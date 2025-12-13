@@ -40,6 +40,7 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
         </head>
         <body class="${initialTheme}">
           <div id="root" class="jsonjoy ${initialTheme}"></div>
+          <script nonce="${nonce}">window.__aggo_nonce__ = "${nonce}";</script>
           ${useDevServer ? `
           <script nonce="${nonce}" type="module">
             import { injectIntoGlobalHook } from "${devServer.httpUrl}/@react-refresh";

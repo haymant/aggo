@@ -1,0 +1,13 @@
+{
+  "name": "@aggo/core",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p ./tsconfig.json",
+    "test": "node ./dist/test-core.js"
+  }
+}

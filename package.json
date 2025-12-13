@@ -29,8 +29,10 @@
   ],
   "main": "out/extension.js",
   "scripts": {
-    "vscode:prepublish": "pnpm run build && pnpm run build:webview",
+    "vscode:prepublish": "pnpm run build:core && pnpm run build && pnpm run build:webview",
+    "build:all": "pnpm run build:core && pnpm run build && pnpm run build:webview",
     "build": "tsc -p ./",
+    "build:core": "tsc -p packages/core/tsconfig.json",
     "build:webview": "vite build --config webview/vite.config.ts",
     "dev:webview": "vite --config webview/vite.config.ts",
     "watch:webview": "vite --config webview/vite.config.ts",
@@ -202,6 +204,10 @@
       {
         "command": "aggo.installComponent",
         "title": "Aggo: Install Component from JS bundle"
+      },
+      {
+        "command": "aggo.uninstallComponent",
+        "title": "Aggo: Uninstall Component"
       }
     ],
     "menus": {
