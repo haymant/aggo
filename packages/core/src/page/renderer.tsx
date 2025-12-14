@@ -121,6 +121,42 @@ function attachEventHandlers(el: AggoPageElement, host: Required<Pick<AggoRender
   return props;
 }
 
+function buildPluginEventCallbacks(el: AggoPageElement, host: Required<Pick<AggoRendererHost, 'handlers' | 'emit' | 'store'>> & { pageId?: string }): Record<string, (...args: any[]) => void> {
+  const callbacks: Record<string, (...args: any[]) => void> = {};
+  const supported: AggoEventName[] = ['click', 'change', 'input', 'submit', 'keydown', 'keyup', 'focus', 'blur'];
+
+  for (const eventName of supported) {
+    const handlerId = getHandlerIdForEvent(el, eventName);
+    if (!handlerId) continue;
+
+    const handler = host.handlers?.[handlerId];
+    if (!handler) continue;
+
+    const invoke = async (event: unknown) => {
+      const ctx: AggoHandlerContext = {
+        pageId: host.pageId,
+        elementId: el.id,
+        element: el,
+        eventName,
+        event,
+        store: host.store,
+        emit: host.emit
+      };
+      await handler(ctx);
+    };
+
+    // Provide both canonical and React-style names.
+    callbacks[eventName] = (event?: any) => {
+      void invoke(event);
+    };
+    callbacks[reactPropForEvent(eventName)] = (event?: any) => {
+      void invoke(event);
+    };
+  }
+
+  return callbacks;
+}
+
 export function AggoElementRenderer(props: { element: AggoPageElement; host?: AggoRendererHost }): React.ReactElement {
   const host: AggoRendererHost = props.host ?? {};
   const store = host.store ?? createAggoStore({});
@@ -141,11 +177,16 @@ export function AggoElementRenderer(props: { element: AggoPageElement; host?: Ag
   const eventProps = attachEventHandlers(el, { handlers, emit, store, pageId: host.pageId });
 
   if (Component) {
+    const pluginEvents = buildPluginEventCallbacks(el, { handlers, emit, store, pageId: host.pageId });
     const pluginProps: any = {
       id: el.id,
       attributes: el.attributes ?? {},
       content: el.content,
       styles: el.styles ?? {},
+      editMode: false,
+      events: pluginEvents,
+      emit,
+      ctx: { pageId: host.pageId, store },
       // webview editing support: plugin may call this; hosts can listen via "emit".
       onChange: (delta: any) => emit('element.change', { id: el.id, delta })
     };

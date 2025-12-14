@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { vscode } from '../utils/vscode';
-import { libraryCategories } from '../../../packages/core/dist';
+import { libraryCategories } from '@aggo/core';
 
 // Simple icons as components
 const Icons: Record<string, React.FC<{ className?: string }>> = {

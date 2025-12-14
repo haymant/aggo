@@ -47,6 +47,39 @@ export const libraryCategories: LibraryCategory[] = [
     label: 'General',
     components: [
       {
+        icon: 'Minus',
+        name: 'Button',
+        description: 'Button element',
+        template: {
+          tagName: 'button',
+          attributes: { type: 'button' },
+          styles: {
+            padding: '10px 14px',
+            borderRadius: '6px',
+            backgroundColor: '#3b82f6',
+            color: '#ffffff',
+            border: 'none',
+            cursor: 'pointer'
+          },
+          content: 'Button'
+        }
+      },
+      {
+        icon: 'Type',
+        name: 'Text Input',
+        description: 'Input element',
+        template: {
+          tagName: 'input',
+          attributes: { type: 'text', placeholder: 'Enter text…' },
+          styles: {
+            padding: '8px 10px',
+            borderRadius: '6px',
+            border: '1px solid #d1d5db'
+          },
+          content: ''
+        }
+      },
+      {
         icon: 'Square',
         name: 'Div Container',
         description: 'Layout container',
@@ -434,7 +467,11 @@ export const BuiltinHeader = ({ attributes, content }: AggoComponentProps) => {
 export const builtins: Record<string, any> = {
   Button: {
     meta: { id: 'Button', name: 'Button', category: 'Built-in', icon: '' },
-    schema: { title: 'Button', properties: { label: { type: 'string', default: 'Button' } } },
+    schema: {
+      title: 'Button',
+      properties: { label: { type: 'string', default: 'Button' } },
+      events: [{ name: 'onClick', title: 'Click' }]
+    },
     Component: BuiltinButton
   },
   Header: {
@@ -445,7 +482,11 @@ export const builtins: Record<string, any> = {
   ,
   Input: {
     meta: { id: 'Input', name: 'Text Input', category: 'Built-in', icon: '' },
-    schema: { title: 'Text Input', properties: { placeholder: { type: 'string', default: '' }, type: { type: 'string', default: 'text' } } },
+    schema: {
+      title: 'Text Input',
+      properties: { placeholder: { type: 'string', default: '' }, type: { type: 'string', default: 'text' } },
+      events: [{ name: 'onChange', title: 'Change' }, { name: 'onInput', title: 'Input' }]
+    },
     Component: ({ attributes, editMode, onSelect }: AggoComponentProps) => {
       const placeholder = attributes?.placeholder || '';
       const type = attributes?.type || 'text';
@@ -476,6 +517,9 @@ builtins['h2'] = { ...builtins['Header'], defaultAttributes: { level: 2 } };
 builtins['h3'] = { ...builtins['Header'], defaultAttributes: { level: 3 } };
 builtins['h4'] = { ...builtins['Header'], defaultAttributes: { level: 4 } };
 builtins['div'] = builtins['Div'];
+builtins['input'] = builtins['Input'];
+builtins['label'] = builtins['Label'];
+builtins['img'] = builtins['Image'];
 
 export default builtins;
 

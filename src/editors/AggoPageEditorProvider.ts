@@ -5,6 +5,7 @@ import { getHtmlForWebview } from '../utils/webviewHelper';
 import { setActivePanel, registerPanel, unregisterPanel } from '../utils/activePanel';
 import { AggoPropertyViewProvider } from '../views/AggoPropertyViewProvider';
 import { attachFileBridgeHandler } from '../utils/attachFileBridgeHandler';
+import { pageIdFromFsPath } from '../utils/pagePath';
 
 export class AggoPageEditorProvider implements vscode.CustomTextEditorProvider {
   private isDev: boolean;
@@ -100,7 +101,8 @@ export class AggoPageEditorProvider implements vscode.CustomTextEditorProvider {
       } else if (msg.type === 'selectionChanged') {
         // Forward selection changes from the page editor to the property view if present
         try {
-          AggoPropertyViewProvider.postMessageToWebview({ type: 'selectionChanged', element: msg.element });
+          const pageId = workspaceRoot ? pageIdFromFsPath(workspaceRoot.fsPath, document.uri.fsPath) : undefined;
+          AggoPropertyViewProvider.postMessageToWebview({ type: 'selectionChanged', element: msg.element, pageId });
           console.debug('[aggo] forwarded selectionChanged from page editor to property view', { elementId: msg?.element?.id });
         } catch (e) { console.warn('[aggo] failed to forward selectionChanged to property view', e); }
       }

@@ -1,4 +1,54 @@
 # Aggo Page Editor Design
+Summarized conversation history
+
+Summarized conversation history
+
+Plan:
+
+Add Next.js per-page handlers convention (handlers.ts in route dir) and adjust codegen to use a client wrapper so Next.js doesn’t pass functions from server → client.
+Extend extension host + Properties webview messaging to (a) request available handlers for the current page and (b) create a new handler stub.
+Update Properties UI to show handler dropdowns for Events/Lifecycle and a “New” action that generates the function and selects it.
+Validate via TypeScript build/watch output and a quick pnpm test.
+Edited
+nextjsCodegen.ts+75-5
+
+Edited
+AggoPageEditorProvider.ts+3-1
+Edited
+AggoPropertyViewProvider.ts+82-0
+
+Edited
+Properties.tsx+125-22
+pnpm test
+pnpm test
+
+Implemented the “handlers live in the page routes dir” convention + editor wiring
+
+Per-page handler file convention: Next.js runtime now uses src/app/aggo/page/<pageId>/handlers.ts (created if missing).
+Fixed Next.js server→client function passing: generated routes now render through a generated client wrapper client.tsx, so handler functions are imported on the client side (no non-
+Plan:
+
+Add Next.js per-page handlers convention (handlers.ts in route dir) and adjust codegen to use a client wrapper so Next.js doesn’t pass functions from server → client.
+Extend extension host + Properties webview messaging to (a) request available handlers for the current page and (b) create a new handler stub.
+Update Properties UI to show handler dropdowns for Events/Lifecycle and a “New” action that generates the function and selects it.
+Validate via TypeScript build/watch output and a quick pnpm test.
+Edited
+nextjsCodegen.ts+75-5
+
+Edited
+AggoPageEditorProvider.ts+3-1
+Edited
+AggoPropertyViewProvider.ts+82-0
+
+Edited
+Properties.tsx+125-22
+pnpm test
+pnpm test
+
+Implemented the “handlers live in the page routes dir” convention + editor wiring
+
+Per-page handler file convention: Next.js runtime now uses src/app/aggo/page/<pageId>/handlers.ts (created if missing).
+Fixed Next.js server→client function passing: generated routes now render through a generated client wrapper client.tsx, so handler functions are imported on the client side (no non-
 
 This document describes the page authoring experience for `*.page` files and the missing pieces needed to fully support **Run** and **Debug** of user TypeScript code (event handlers, lifecycle hooks, stores).
 
@@ -213,9 +263,6 @@ Events are stored as string references in page JSON, selected via the property p
 
 Supported MVP conventions:
 
-- Preferred: `events: { "click": "my.handler.id" }`
-- Also supported (back-compat): `events: { "onClick": { "handler": "my.handler.id" } }`
-- Also supported (attribute-based): `attributes: { "data-on-click": "my.handler.id" }`
 
 Example element:
 
@@ -230,6 +277,44 @@ Example element:
   "content": "Submit"
 }
 ```
+
+#### Events
+
+Event wiring is stored on the element as `events` and/or `attributes`:
+
+```json
+{
+  "id": "btn-1",
+  "tagName": "button",
+  "events": {
+    "onClick": "rfq.view.onSubmit"
+  }
+}
+```
+
+At runtime (Run/Debug), `@aggo/core` resolves these handler ids via `host.handlers` and attaches them to DOM events (and passes event callbacks into plugin components).
+
+In the editor webview, these are *configured* but not executed.
+
+#### Lifecycle
+
+Lifecycle handlers are stored on the root element:
+
+```json
+{
+  "id": "root",
+  "lifecycle": {
+    "onMount": "rfq.view.onMount",
+    "onUnmount": "rfq.view.onUnmount"
+  }
+}
+```
+
+The runtime calls these during mount/unmount of the page route.
+
+#### Store
+
+The MVP store is provided automatically by the runtime renderer; handlers receive it as `ctx.store`. The editor does not run store logic.
 
 The runtime resolves `rfq.view.onSubmit` to an actual function via a generated registry that wraps a user-editable file:
 

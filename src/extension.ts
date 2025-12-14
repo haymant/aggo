@@ -276,6 +276,53 @@ export function activate(context: vscode.ExtensionContext) {
     return active?.document?.uri;
   };
 
+  let runtimePreviewPanel: vscode.WebviewPanel | undefined;
+  const runtimePreviewViewType = 'aggo.runtimePreview';
+
+  const getEffectiveRuntimeBaseUrl = async (): Promise<string> => {
+    const { baseUrl } = resolveRuntimeSettings();
+    const detected = runtimeManager.getDetectedBaseUrl();
+    return detected ?? baseUrl;
+  };
+
+  const renderRuntimePreviewHtml = (url: string): string => {
+    const escaped = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http: https:; style-src 'unsafe-inline';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aggo Runtime Preview</title>
+    <style>
+      html, body { height: 100%; padding: 0; margin: 0; }
+      iframe { width: 100%; height: 100%; border: 0; }
+    </style>
+  </head>
+  <body>
+    <iframe src="${escaped}"></iframe>
+  </body>
+</html>`;
+  };
+
+  const openRuntimePreview = async (url: string): Promise<void> => {
+    if (!runtimePreviewPanel) {
+      runtimePreviewPanel = vscode.window.createWebviewPanel(
+        runtimePreviewViewType,
+        'Aggo: Runtime Preview',
+        vscode.ViewColumn.Beside,
+        { enableScripts: false, retainContextWhenHidden: true }
+      );
+      runtimePreviewPanel.onDidDispose(() => {
+        runtimePreviewPanel = undefined;
+      });
+    }
+
+    runtimePreviewPanel.title = `Aggo: Runtime Preview`;
+    runtimePreviewPanel.webview.html = renderRuntimePreviewHtml(url);
+    runtimePreviewPanel.reveal(vscode.ViewColumn.Beside, true);
+  };
+
   context.subscriptions.push(vscode.commands.registerCommand('aggo.refreshPages', () => {
     pagesProvider?.refresh();
   }));
@@ -319,6 +366,96 @@ export function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand('vscode.openWith', pageUri, 'aggo.pageEditor');
   }));
 
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.openRuntimePreview', async (arg?: unknown) => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+
+    const pageUri = pickPageUri(arg);
+    const { devScript, cwd } = resolveRuntimeSettings();
+    await runtimeManager.ensureStarted({ kind: 'dev', workspaceRoot, cwd, script: devScript });
+
+    const baseUrl = await getEffectiveRuntimeBaseUrl();
+    let url = baseUrl;
+    if (pageUri && typeof pageUri.fsPath === 'string' && pageUri.fsPath.endsWith('.page')) {
+      const pageId = pageIdFromFsPath(workspaceRoot, pageUri.fsPath);
+      url = pageUrlFromId(baseUrl, pageId);
+    }
+
+    await openRuntimePreview(url);
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.stopRuntimeDevServer', async () => {
+    await runtimeManager.stop();
+    vscode.window.showInformationMessage('Aggo: runtime dev server stopped.');
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.restartRuntimeDevServer', async () => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+    const { devScript, cwd } = resolveRuntimeSettings();
+    await runtimeManager.restart({ kind: 'dev', workspaceRoot, cwd, script: devScript });
+    vscode.window.showInformationMessage('Aggo: runtime dev server restarted.');
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.generateLaunchJson', async () => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+
+    const { cwd } = resolveRuntimeSettings();
+    const relCwd = workspaceRoot ? path.relative(workspaceRoot, cwd).split(path.sep).join('/') : '';
+    const webRoot = relCwd && !relCwd.startsWith('..') ? '${workspaceFolder}/' + relCwd : '${workspaceFolder}';
+
+    try {
+      const vscodeDir = path.join(workspaceRoot, '.vscode');
+      await fs.promises.mkdir(vscodeDir, { recursive: true });
+      const launchPath = path.join(vscodeDir, 'launch.json');
+
+      let launch: any = { version: '0.2.0', configurations: [], inputs: [] };
+      if (fs.existsSync(launchPath)) {
+        try {
+          launch = JSON.parse(await fs.promises.readFile(launchPath, 'utf8'));
+        } catch {
+          launch = { version: '0.2.0', configurations: [], inputs: [] };
+        }
+      }
+
+      if (!Array.isArray(launch.configurations)) launch.configurations = [];
+      if (!Array.isArray(launch.inputs)) launch.inputs = [];
+
+      if (!launch.inputs.some((i: any) => i?.id === 'aggoPageId')) {
+        launch.inputs.push({
+          id: 'aggoPageId',
+          type: 'promptString',
+          description: 'Aggo page id (e.g. rfq/view)',
+          default: 'rfq/view'
+        });
+      }
+
+      const name = 'Aggo: Debug Page (Dev)';
+      if (!launch.configurations.some((c: any) => c?.name === name)) {
+        launch.configurations.push({
+          name,
+          type: 'pwa-chrome',
+          request: 'launch',
+          url: '${config:aggo.runtime.baseUrl}/aggo/page/${input:aggoPageId}',
+          webRoot,
+          sourceMaps: true
+        });
+      }
+
+      await fs.promises.writeFile(launchPath, JSON.stringify(launch, null, 2), 'utf8');
+      vscode.window.showInformationMessage('Aggo: .vscode/launch.json updated.');
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Aggo: failed updating launch.json: ${err?.message || String(err)}`);
+    }
+  }));
+
   context.subscriptions.push(vscode.commands.registerCommand('aggo.runPageDev', async (arg?: unknown) => {
     if (!workspaceRoot) {
       vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
@@ -331,8 +468,11 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const { baseUrl, devScript, cwd } = resolveRuntimeSettings();
+    const { devScript, cwd } = resolveRuntimeSettings();
     await runtimeManager.ensureStarted({ kind: 'dev', workspaceRoot, cwd, script: devScript });
+    await runtimeManager.waitForDetectedBaseUrl(10_000);
+
+    const baseUrl = await getEffectiveRuntimeBaseUrl();
 
     const pageId = pageIdFromFsPath(workspaceRoot, pageUri.fsPath);
     const url = pageUrlFromId(baseUrl, pageId);
@@ -351,8 +491,11 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const { baseUrl, devScript, cwd } = resolveRuntimeSettings();
+    const { devScript, cwd } = resolveRuntimeSettings();
     await runtimeManager.ensureStarted({ kind: 'dev', workspaceRoot, cwd, script: devScript });
+    await runtimeManager.waitForDetectedBaseUrl(10_000);
+
+    const baseUrl = await getEffectiveRuntimeBaseUrl();
 
     const pageId = pageIdFromFsPath(workspaceRoot, pageUri.fsPath);
     const url = pageUrlFromId(baseUrl, pageId);

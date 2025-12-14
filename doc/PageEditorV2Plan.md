@@ -14,21 +14,37 @@ This repo is the **Aggo extension** repo, not the user's React runtime app. Ther
 
 ---
 
-## A. Gap Analysis (What’s Missing Today)
+## Status (Current Repo)
 
-From the current implementation:
+Phase 1 is implemented end-to-end:
 
-1. No Pages tree view. Existing `Aggo` activity container only includes webview views (`Components`, `Details`).
-2. No dev-server lifecycle manager in the extension (start/stop/reuse, output capture).
-3. No Run/Debug commands that operate on a `*.page` file.
-4. No runtime URL conventions encoded in code (path -> pageId -> URL).
-5. No test harness in `src/test` even though `package.json` expects `out/test/runTest.js`.
+- Pages tree view exists under `Aggo > Pages`.
+- Run (Dev) + Debug (Dev) commands exist and work from the tree.
+- Runtime dev server manager exists.
+- Next.js runtime scaffolding + route sync exists.
+- Unit test harness exists and `pnpm test` runs.
 
-From the design docs:
+Phase 2 is partially implemented:
 
-- Event wiring, lifecycle, and store contracts are defined at the JSON/schema level, but runtime plumbing (registry, router, loader) is not implemented in this extension repo.
+- Runtime Preview panel exists (iframe-based).
+- Stop/Restart runtime server commands exist.
+- Port/baseUrl detection exists (parses dev-server output).
+- launch.json generator command exists.
+
+Phase 3 is implemented at the shared-renderer + runtime-codegen level:
+
+- Single-source renderer exists as `packages/core` (`@aggo/core`).
+- Next.js codegen routes render via `@aggo/core` wrapper and inject runtime plugins.
+- Handler registry generation exists (`src/aggo/generated/handlers.ts` + `src/aggo/user/handlers.ts`).
 
 ---
+
+## A. Gap Analysis (What’s Left)
+
+Remaining gaps are mostly “robustness + runtime correctness” items:
+
+- Runtime plugin compatibility still depends on the runtime loading the latest generated files (run `Aggo: Sync Next.js Routes from Pages` after upgrading the extension).
+- Store factory wiring (`store.factory`) is not yet standardized across runtimes; the current MVP supports `initialState` and handler wiring.
 
 ## B. Implementation Plan
 
@@ -55,6 +71,8 @@ Goal: select a page under `resources/page/**` and:
 	  - `Aggo: Run Page (Dev)`
 	  - `Aggo: Debug Page (Dev)`
 
+Implemented in repo.
+
 #### 2) Implement Runtime URL Mapping
 
 Add pure utilities:
@@ -65,6 +83,8 @@ Add pure utilities:
 Conventions:
 
 - `resources/page/<segments>.page` maps to `/aggo/page/<segments>`
+
+Implemented in repo.
 
 #### 3) Implement Dev Server Manager (Extension Host)
 
@@ -79,6 +99,8 @@ Add `RuntimeServerManager`:
 - Stream output to a dedicated `OutputChannel` (`Aggo: Runtime`)
 - Provide `stop()` (optional command in phase 2)
 
+Implemented in repo (and extended in Phase 2 with stop/restart + baseUrl detection).
+
 #### 4) Run (Dev) Command
 
 Command: `aggo.runPageDev`
@@ -88,6 +110,8 @@ Behavior:
 1. Resolve the page URI (from tree view selection or command argument).
 2. Ensure dev server is running.
 3. Open the runtime URL using `vscode.env.openExternal(...)`.
+
+Implemented in repo.
 
 #### 5) Debug (Dev) Command
 
@@ -104,6 +128,8 @@ Behavior:
 	- `webRoot: ${workspaceFolder}`
 4. Let the debugger open the browser.
 
+Implemented in repo.
+
 #### 6) Add Configuration Settings
 
 Contribute settings under `aggo.runtime.*`:
@@ -111,6 +137,8 @@ Contribute settings under `aggo.runtime.*`:
 - `aggo.runtime.baseUrl` (default `http://localhost:5173`)
 - `aggo.runtime.devScript` (default `dev`)
 - `aggo.runtime.cwd` (default workspace folder)
+
+Implemented in repo.
 
 Notes:
 
@@ -136,6 +164,8 @@ Notes:
 
 - Shadcn/ui can be added later, but its installer is interactive and should be a follow-on step once we decide how prescriptive we want to be.
 
+Implemented in repo.
+
 #### 8) (Optional) Next.js Route Codegen + File Watcher (fixes 404)
 
 Problem this solves:
@@ -159,14 +189,16 @@ Add code generation owned by the extension host:
 3. Integration with scaffold command:
 	- `Aggo: Scaffold Next.js Runtime` enables codegen and calls the sync command automatically.
 
+Implemented in repo.
+
 ---
 
 ### Phase 2 — Better UX + Robustness
 
-1. Add a “Runtime Preview” webview panel that embeds an iframe.
-2. Add stop/restart server commands.
-3. Detect runtime port by parsing server output or reading Vite config.
-4. Add a “Generate launch.json” helper.
+1. Add a “Runtime Preview” webview panel that embeds an iframe. (Implemented)
+2. Add stop/restart server commands. (Implemented)
+3. Detect runtime port by parsing server output or reading Vite config. (Implemented: output parsing)
+4. Add a “Generate launch.json” helper. (Implemented)
 
 ---
 
@@ -196,6 +228,8 @@ Then update the Next.js route codegen to import/re-export from `@aggo/core` inst
 1. Ensure the runtime project has `@aggo/core` installed (MVP: install as `file:../packages/core` from the runtime folder).
 2. Generate `src/aggo/generated/renderer.tsx` as a wrapper re-exporting `AggoPage` from `@aggo/core`.
 
+Implemented in repo.
+
 #### Phase 3.2 — Handler registry generation (follow-on)
 
 1. Generate a runtime module `src/aggo/generated/handlers.ts` (tagged `@aggo-generated`) that re-exports `handlers` from a user-editable file.
@@ -204,23 +238,26 @@ Then update the Next.js route codegen to import/re-export from `@aggo/core` inst
 	- stubs are generated from handler ids referenced by `*.page` JSON (events/attributes/lifecycle)
 3. Update generated routes to pass `handlers` into `<AggoPage root={...} host={{ pageId, handlers }} />`.
 
+Implemented in repo.
+
 This extension repo can later generate/maintain the handler registry file, but it still executes in the user runtime.
 
 ---
 
 ## C. Testing Plan
 
-This repo currently lacks a usable test harness (the `test` script expects `out/test/runTest.js`, but there is no `src/test` implementation).
+This repo has a working Node-based unit test harness and a manual VS Code smoke test checklist.
 
 ### C1) Unit Tests (Node-only, no VS Code integration)
 
-Create `src/test/runTest.ts` that:
+Validate pure utilities and codegen helpers, including:
 
-- Imports pure utilities and validates:
-  - `pageIdFromPath` behavior
-  - runtime URL formatting
-  - package manager detection (based on file presence)
-  - debug configuration generation
+- `pageIdFromFsPath` behavior
+- runtime URL formatting
+- package manager detection
+- debug configuration generation
+- codegen marker helpers
+- runtime baseUrl extraction (port detection)
 
 Run via existing scripts:
 
@@ -235,6 +272,16 @@ Run via existing scripts:
 4. Click a leaf page node opens in Aggo Page Editor.
 5. Run context command “Aggo: Run Page (Dev)” opens browser to expected URL.
 6. Run “Aggo: Debug Page (Dev)” launches Chrome debug session.
+
+Phase 2 smoke:
+
+7. Run “Aggo: Runtime Preview” from a page context menu → iframe loads the runtime page.
+8. Run “Aggo: Stop Runtime Dev Server” and “Aggo: Restart Runtime Dev Server”.
+9. Run “Aggo: Generate launch.json for Debugging” and verify `.vscode/launch.json` is created/updated.
+
+Next.js codegen smoke (when `aggo.runtime.codegen.enabled = true`):
+
+10. Run “Aggo: Sync Next.js Routes from Pages” and verify routes appear in the runtime under `src/app/aggo/page/**/page.tsx`.
 
 ---
 

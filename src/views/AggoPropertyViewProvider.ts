@@ -5,6 +5,13 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { getHtmlForWebview } from '../utils/webviewHelper';
 import { normalizeBridgeContent } from '../utils/fileBridge';
+import { detectNextjsAppDir, routeDirForPageId } from '../utils/nextjsCodegen';
+import {
+  addHandlerToPageHandlersFile,
+  listHandlersFromPageHandlersFile,
+  renderPageHandlersFile,
+  isValidHandlerName
+} from '../utils/pageHandlersFile';
 
 export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'aggo.properties';
@@ -91,6 +98,59 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       const baseDir = workspaceFolder ?? process.cwd();
       return vscode.Uri.file(path.resolve(baseDir, targetPath));
+    };
+
+    const resolveRuntimeCwdAbs = (): string | undefined => {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceFolder) return undefined;
+      const cfg = vscode.workspace.getConfiguration('aggo.runtime');
+      const cwdSetting = (cfg.get<string>('cwd') ?? '').trim();
+      if (!cwdSetting) return workspaceFolder;
+      return path.isAbsolute(cwdSetting) ? cwdSetting : path.join(workspaceFolder, cwdSetting);
+    };
+
+    const resolvePageHandlersPath = (runtimeRootAbs: string, pageId: string): { handlersAbs: string; routeDirAbs: string } => {
+      const appDir = detectNextjsAppDir(runtimeRootAbs);
+      const routeDirAbs = routeDirForPageId(appDir, pageId);
+      return { handlersAbs: path.join(routeDirAbs, 'handlers.ts'), routeDirAbs };
+    };
+
+    const ensurePageHandlersFile = async (runtimeRootAbs: string, pageId: string): Promise<string> => {
+      const { handlersAbs, routeDirAbs } = resolvePageHandlersPath(runtimeRootAbs, pageId);
+      if (!fs.existsSync(routeDirAbs)) {
+        await fs.promises.mkdir(routeDirAbs, { recursive: true });
+      }
+      if (!fs.existsSync(handlersAbs)) {
+        await fs.promises.writeFile(handlersAbs, renderPageHandlersFile([]), 'utf8');
+      }
+      return handlersAbs;
+    };
+
+    const listPageHandlers = async (pageId: string): Promise<string[]> => {
+      const runtimeRootAbs = resolveRuntimeCwdAbs();
+      if (!runtimeRootAbs || !fs.existsSync(runtimeRootAbs)) {
+        throw new Error('Runtime folder not found. Configure aggo.runtime.cwd first.');
+      }
+      const handlersAbs = await ensurePageHandlersFile(runtimeRootAbs, pageId);
+      const raw = await fs.promises.readFile(handlersAbs, 'utf8');
+      return listHandlersFromPageHandlersFile(raw);
+    };
+
+    const createPageHandler = async (pageId: string, handlerName: string): Promise<{ handlers: string[]; filePath: string }> => {
+      if (!isValidHandlerName(handlerName)) {
+        throw new Error('Handler name must be a valid identifier (e.g. onClick, handleSubmit).');
+      }
+      const runtimeRootAbs = resolveRuntimeCwdAbs();
+      if (!runtimeRootAbs || !fs.existsSync(runtimeRootAbs)) {
+        throw new Error('Runtime folder not found. Configure aggo.runtime.cwd first.');
+      }
+      const handlersAbs = await ensurePageHandlersFile(runtimeRootAbs, pageId);
+      const raw = await fs.promises.readFile(handlersAbs, 'utf8');
+      const { updated, changed } = addHandlerToPageHandlersFile(raw, handlerName);
+      if (changed) {
+        await fs.promises.writeFile(handlersAbs, updated, 'utf8');
+      }
+      return { handlers: listHandlersFromPageHandlersFile(updated), filePath: handlersAbs };
     };
 
     const openWithAggoEditor = async (uri: vscode.Uri) => {
@@ -250,6 +310,28 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
         }
       } else if (message.type === 'updateElement') {
         vscode.commands.executeCommand('aggo.updateElement', message.element);
+      } else if (message.type === 'requestHandlers') {
+        const pageId = (message?.pageId as string | undefined) || '';
+        const requestId = message?.id;
+        try {
+          if (!pageId) throw new Error('Missing pageId');
+          const handlers = await listPageHandlers(pageId);
+          webviewView.webview.postMessage({ type: 'handlersList', id: requestId, pageId, handlers });
+        } catch (err: any) {
+          webviewView.webview.postMessage({ type: 'handlersList', id: requestId, pageId, handlers: [], error: err?.message || String(err) });
+        }
+      } else if (message.type === 'createHandler') {
+        const pageId = (message?.pageId as string | undefined) || '';
+        const name = (message?.name as string | undefined) || '';
+        const requestId = message?.id;
+        try {
+          if (!pageId) throw new Error('Missing pageId');
+          if (!name) throw new Error('Missing handler name');
+          const result = await createPageHandler(pageId, name);
+          webviewView.webview.postMessage({ type: 'handlersList', id: requestId, pageId, handlers: result.handlers });
+        } catch (err: any) {
+          webviewView.webview.postMessage({ type: 'handlersList', id: requestId, pageId, handlers: [], error: err?.message || String(err) });
+        }
       }
     });
   }

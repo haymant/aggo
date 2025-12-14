@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { vscode } from "../utils/vscode";
-import builtins from '../../../packages/core/dist';
+import builtins from '@aggo/core';
 
 type ElementData = {
   id: string;
@@ -8,6 +8,8 @@ type ElementData = {
   attributes?: Record<string, string>;
   styles?: Record<string, string>;
   content?: string;
+  events?: Record<string, any>;
+  lifecycle?: { onMount?: any; onUnmount?: any };
   // CPN specific
   type?: string;
   data?: any;
@@ -239,10 +241,13 @@ const CPNProperties: React.FC<{ element: ElementData; onUpdate: (data: ElementDa
 export const Properties: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"props" | "styles">("props");
   const [element, setElement] = useState<ElementData | null>(null);
+  const [pageId, setPageId] = useState<string | null>(null);
+  const [availableHandlers, setAvailableHandlers] = useState<string[]>([]);
   const [pluginRegistry, setPluginRegistry] = useState<Record<string, any>>({});
   const loadedScriptsRef = useRef<Record<string, 'pending' | 'loaded' | 'failed'>>({});
   const pluginRegistryRef = useRef<Record<string, any>>({});
   const requestedComponentRef = useRef<Record<string, boolean>>({});
+  const handlersRequestIdRef = useRef(1);
 
   useEffect(() => {
     pluginRegistryRef.current = pluginRegistry || {};
@@ -296,11 +301,52 @@ export const Properties: React.FC = () => {
     }
   };
 
+  const requestHandlers = (pid: string) => {
+    try {
+      const id = `req-${handlersRequestIdRef.current++}`;
+      vscode.postMessage({ type: 'requestHandlers', id, pageId: pid });
+    } catch (_) {
+      // ignore
+    }
+  };
+
+  const pickUniqueHandlerName = (base: string): string => {
+    const normalizedBase = (base || 'handler').trim() || 'handler';
+    const set = new Set((availableHandlers || []).filter(Boolean));
+    if (!set.has(normalizedBase)) return normalizedBase;
+    for (let i = 2; i < 1000; i++) {
+      const candidate = `${normalizedBase}${i}`;
+      if (!set.has(candidate)) return candidate;
+    }
+    return `${normalizedBase}${Date.now()}`;
+  };
+
+  const createHandler = async (pid: string, args: { suggestedName?: string; prompt?: boolean }): Promise<string | null> => {
+    const prompt = args.prompt ?? true;
+    const suggested = pickUniqueHandlerName(args.suggestedName || 'onClick');
+    const name = prompt
+      ? (window.prompt('New handler name', suggested) || '').trim()
+      : suggested;
+    if (!name) return null;
+    try {
+      const id = `req-${handlersRequestIdRef.current++}`;
+      vscode.postMessage({ type: 'createHandler', id, pageId: pid, name });
+      return name;
+    } catch (_) {
+      return null;
+    }
+  };
+
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       const msg = ev.data;
       if (msg.type === "selectionChanged") {
         setElement(msg.element);
+        if (typeof msg.pageId === 'string' && msg.pageId.trim()) {
+          const pid = msg.pageId.trim();
+          setPageId(pid);
+          requestHandlers(pid);
+        }
       } else if (msg.type === 'componentCatalogUpdated') {
         try {
           const registry = msg.registry || {};
@@ -324,11 +370,25 @@ export const Properties: React.FC = () => {
         }
       } else if (msg.type === "update") {
         // Handle updates from extension if needed
+      } else if (msg.type === 'handlersList') {
+        try {
+          if (msg.error) {
+            console.warn('[aggo properties] handlersList error', msg.error);
+          }
+          if (typeof msg.pageId === 'string' && pageId && msg.pageId !== pageId) {
+            // Ignore stale responses.
+            return;
+          }
+          const handlers = Array.isArray(msg.handlers) ? msg.handlers.filter(Boolean) : [];
+          setAvailableHandlers(handlers);
+        } catch (_) {
+          // ignore
+        }
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, []);
+  }, [pageId]);
 
   const updateElement = (updates: Partial<ElementData>) => {
     if (!element) return;
@@ -357,6 +417,36 @@ export const Properties: React.FC = () => {
       newAttrs[key] = value;
     }
     updateElement({ attributes: newAttrs });
+  };
+
+  const updateEventHandler = (eventName: string, handlerId: string) => {
+    if (!element) return;
+    const nextEvents = { ...(element.events || {}) } as any;
+    const trimmed = (handlerId || '').trim();
+    if (!trimmed) {
+      delete nextEvents[eventName];
+    } else {
+      nextEvents[eventName] = trimmed;
+    }
+    updateElement({ events: nextEvents });
+  };
+
+  const updateLifecycleHandler = (key: 'onMount' | 'onUnmount', handlerId: string) => {
+    if (!element) return;
+    const nextLifecycle: any = { ...(element.lifecycle || {}) };
+    const trimmed = (handlerId || '').trim();
+    if (!trimmed) {
+      delete nextLifecycle[key];
+    } else {
+      nextLifecycle[key] = trimmed;
+    }
+    updateElement({ lifecycle: nextLifecycle });
+  };
+
+  const suggestHandlerName = (evName: string) => {
+    const raw = String(evName || '').replace(/^on/i, '');
+    const cap = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Click';
+    return `on${cap}`;
   };
 
   if (!element) {
@@ -455,6 +545,15 @@ export const Properties: React.FC = () => {
               }
               if (!entry || !entry.schema) return <></>;
               const propsSchema = (entry.schema as any).properties || {};
+              const schemaEvents: Array<{ name: string; title?: string; description?: string }> = Array.isArray((entry.schema as any).events)
+                ? (entry.schema as any).events
+                : [];
+              const existingEventKeys = Object.keys(element.events || {});
+              const eventNames = Array.from(new Set([...
+                schemaEvents.map((e) => e.name),
+                ...existingEventKeys
+              ])).filter(Boolean);
+
               return (
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold">Plugin Properties</h4>
@@ -471,6 +570,122 @@ export const Properties: React.FC = () => {
                     }
                     return (<div key={p}>{p}: unsupported field type</div>);
                   })}
+
+                  {(eventNames.length > 0) && (
+                    <div className="space-y-2 pt-2">
+                      <h4 className="text-xs font-bold">Events</h4>
+                      {eventNames.map((evName) => {
+                        const spec = schemaEvents.find((e) => e.name === evName);
+                        const current = (() => {
+                          const v = (element.events as any)?.[evName];
+                          if (typeof v === 'string') return v;
+                          if (v && typeof v === 'object' && typeof (v as any).handler === 'string') return (v as any).handler;
+                          return '';
+                        })();
+                        return (
+                          <div key={evName} className="space-y-1">
+                            <label className="text-xs text-muted-foreground">{spec?.title || evName}</label>
+                            <div className="flex gap-2">
+                              <select
+                                className="flex-1 p-1 text-xs bg-background border border-input rounded"
+                                value={current}
+                                onChange={(e) => updateEventHandler(evName, e.target.value)}
+                              >
+                                <option value="">(none)</option>
+                                {availableHandlers.map((h) => (
+                                  <option key={h} value={h}>{h}</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80"
+                                disabled={!pageId}
+                                onClick={async () => {
+                                  if (!pageId) return;
+                                  const isEmpty = !current;
+                                  const created = await createHandler(pageId, {
+                                    suggestedName: suggestHandlerName(evName),
+                                    // When nothing is wired yet, create a default handler without prompting.
+                                    prompt: !isEmpty
+                                  });
+                                  if (created) {
+                                    // Optimistically set selection; list will refresh from host response.
+                                    updateEventHandler(evName, created);
+                                  }
+                                }}
+                              >
+                                New
+                              </button>
+                            </div>
+                            {spec?.description ? <div className="text-[10px] text-muted-foreground">{spec.description}</div> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {(element.id === 'root') && (
+                    <div className="space-y-2 pt-2">
+                      <h4 className="text-xs font-bold">Page Lifecycle</h4>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">onMount</label>
+                        <div className="flex gap-2">
+                          <select
+                            className="flex-1 p-1 text-xs bg-background border border-input rounded"
+                            value={(element.lifecycle as any)?.onMount || ''}
+                            onChange={(e) => updateLifecycleHandler('onMount', e.target.value)}
+                          >
+                            <option value="">(none)</option>
+                            {availableHandlers.map((h) => (
+                              <option key={h} value={h}>{h}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80"
+                            disabled={!pageId}
+                            onClick={async () => {
+                              if (!pageId) return;
+                              const existing = String((element.lifecycle as any)?.onMount || '').trim();
+                              const created = await createHandler(pageId, { suggestedName: 'onMount', prompt: !!existing });
+                              if (created) updateLifecycleHandler('onMount', created);
+                            }}
+                          >
+                            New
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">onUnmount</label>
+                        <div className="flex gap-2">
+                          <select
+                            className="flex-1 p-1 text-xs bg-background border border-input rounded"
+                            value={(element.lifecycle as any)?.onUnmount || ''}
+                            onChange={(e) => updateLifecycleHandler('onUnmount', e.target.value)}
+                          >
+                            <option value="">(none)</option>
+                            {availableHandlers.map((h) => (
+                              <option key={h} value={h}>{h}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80"
+                            disabled={!pageId}
+                            onClick={async () => {
+                              if (!pageId) return;
+                              const existing = String((element.lifecycle as any)?.onUnmount || '').trim();
+                              const created = await createHandler(pageId, { suggestedName: 'onUnmount', prompt: !!existing });
+                              if (created) updateLifecycleHandler('onUnmount', created);
+                            }}
+                          >
+                            New
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Lifecycle handlers run in the runtime (Run/Debug), not in the editor webview.</div>
+                    </div>
+                  )}
                 </div>
               );
             })()}

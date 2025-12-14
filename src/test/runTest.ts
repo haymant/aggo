@@ -7,6 +7,7 @@ import { pageIdFromFsPath, pageUrlFromId } from '../utils/pagePath';
 import { detectPackageManager, buildRunScriptCommand } from '../utils/packageManager';
 import { buildChromeLaunchConfig } from '../utils/debugConfig';
 import { AGGO_GENERATED_TAG, isAggoGeneratedFile, routeDirForPageId } from '../utils/nextjsCodegen';
+import { extractLocalhostBaseUrl } from '../utils/runtimeBaseUrl';
 
 function testPageIdFromFsPath() {
   const root = '/ws';
@@ -49,6 +50,13 @@ function testNextjsCodegenHelpers() {
   assert.equal(routeDirForPageId('/rt/src/app', 'rfq/view').split(path.sep).join('/'), '/rt/src/app/aggo/page/rfq/view');
 }
 
+function testRuntimeBaseUrlExtraction() {
+  assert.equal(extractLocalhostBaseUrl('Local:   http://localhost:5173/'), 'http://localhost:5173');
+  assert.equal(extractLocalhostBaseUrl('ready - started server on 0.0.0.0:3000, url: http://localhost:3000'), 'http://localhost:3000');
+  assert.equal(extractLocalhostBaseUrl('http://127.0.0.1:4001'), 'http://127.0.0.1:4001');
+  assert.equal(extractLocalhostBaseUrl('no url here'), undefined);
+}
+
 function main() {
   const tests: Array<[string, () => void]> = [
     ['pageIdFromFsPath', testPageIdFromFsPath],
@@ -56,7 +64,8 @@ function main() {
     ['detectPackageManager', testDetectPackageManager],
     ['buildRunScriptCommand', testBuildRunScriptCommand],
     ['buildChromeLaunchConfig', testBuildDebugConfig],
-    ['nextjsCodegenHelpers', testNextjsCodegenHelpers]
+    ['nextjsCodegenHelpers', testNextjsCodegenHelpers],
+    ['runtimeBaseUrlExtraction', testRuntimeBaseUrlExtraction]
   ];
 
   let failed = 0;

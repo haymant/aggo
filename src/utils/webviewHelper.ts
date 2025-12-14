@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { getDevServer } from './devServer';
 
 export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri, viewType: string, title: string, isDev: boolean) {
@@ -16,11 +17,38 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
       styleUri = `${devServer.httpUrl}/src/styles/index.css`;
     } else {
       const scriptPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'main.webview.js');
-      scriptUri = webview.asWebviewUri(scriptPathOnDisk);
+      let scriptWebUri = webview.asWebviewUri(scriptPathOnDisk).toString();
+      try {
+        const mtimeMs = fs.statSync(scriptPathOnDisk.fsPath).mtimeMs;
+        if (Number.isFinite(mtimeMs)) {
+          scriptWebUri = `${scriptWebUri}${scriptWebUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+        }
+      } catch {
+        // ignore
+      }
+      scriptUri = scriptWebUri;
         const cssPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'index.css');
         const mainCssPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'main.css');
-        mainCssUri = webview.asWebviewUri(mainCssPathOnDisk);
-        styleUri = webview.asWebviewUri(cssPathOnDisk);
+        let mainCssWebUri = webview.asWebviewUri(mainCssPathOnDisk).toString();
+        let styleWebUri = webview.asWebviewUri(cssPathOnDisk).toString();
+        try {
+          const mtimeMs = fs.statSync(mainCssPathOnDisk.fsPath).mtimeMs;
+          if (Number.isFinite(mtimeMs)) {
+            mainCssWebUri = `${mainCssWebUri}${mainCssWebUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+          }
+        } catch {
+          // ignore
+        }
+        try {
+          const mtimeMs = fs.statSync(cssPathOnDisk.fsPath).mtimeMs;
+          if (Number.isFinite(mtimeMs)) {
+            styleWebUri = `${styleWebUri}${styleWebUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+          }
+        } catch {
+          // ignore
+        }
+        mainCssUri = mainCssWebUri;
+        styleUri = styleWebUri;
     }
 
     const nonce = getNonce();

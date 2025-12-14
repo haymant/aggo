@@ -131,6 +131,12 @@ export const schema = {
 
 This enables the property panel to show an “Events” section with dropdowns.
 
+**Current UX (implemented):**
+
+- The Properties panel shows an **Events** section when the selected component schema contains `schema.events`.
+- Each event has a text input to set a handler id (string). This is written into `element.events` in the `*.page` JSON.
+- The runtime resolves these handler ids via the generated handler registry and invokes the real functions during Run/Debug.
+
 ### 4.2 Wiring Events (Page JSON)
 
 Each element may contain an `events` object:
@@ -141,7 +147,7 @@ Each element may contain an `events` object:
   "tagName": "button",
   "attributes": { "type": "button" },
   "events": {
-    "onClick": { "handler": "rfq.view.onSubmit" }
+    "onClick": "rfq.view.onSubmit"
   }
 }
 ```
@@ -220,6 +226,17 @@ Components must remain agnostic to page lifecycle and store decisions, but they 
 - Emit events (`props.emit`) and/or receive pre-wired callbacks (`props.events`).
 
 Page-level lifecycle (`onInit/onMount/onUnmount`) is resolved and invoked by the runtime (see doc/PageEditor.md).
+
+**Current UX (implemented):**
+
+- The Properties panel shows a **Page Lifecycle** section when the selected element is the root element (`id: "root"`).
+- It writes `root.lifecycle.onMount` / `root.lifecycle.onUnmount` as handler id strings.
+
+**Store model (current MVP):**
+
+- The runtime provides a default store (see `@aggo/core`), and handlers receive it via `ctx.store`.
+- Handlers can update state via `ctx.store.setState(...)` / `ctx.store.updateState(...)`.
+- A first-class “store factory” selection UI is not implemented yet; if you need a custom store implementation, pass `host.store` from the runtime route.
 
 ---
 

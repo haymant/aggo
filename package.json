@@ -238,6 +238,22 @@
         "title": "Aggo: Debug Page (Dev)"
       },
       {
+        "command": "aggo.openRuntimePreview",
+        "title": "Aggo: Runtime Preview"
+      },
+      {
+        "command": "aggo.stopRuntimeDevServer",
+        "title": "Aggo: Stop Runtime Dev Server"
+      },
+      {
+        "command": "aggo.restartRuntimeDevServer",
+        "title": "Aggo: Restart Runtime Dev Server"
+      },
+      {
+        "command": "aggo.generateLaunchJson",
+        "title": "Aggo: Generate launch.json for Debugging"
+      },
+      {
         "command": "aggo.refreshPages",
         "title": "Aggo: Refresh Pages"
       },
@@ -310,6 +326,11 @@
       "view/item/context": [
         {
           "command": "aggo.openPageFromTree",
+          "when": "view == aggo.pages && viewItem == aggoPage",
+          "group": "navigation"
+        },
+        {
+          "command": "aggo.openRuntimePreview",
           "when": "view == aggo.pages && viewItem == aggoPage",
           "group": "navigation"
         },
