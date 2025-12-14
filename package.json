@@ -17,16 +17,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onView:aggo.library",
-    "onView:aggo.properties",
-    "onCustomEditor:aggo.pageEditor",
-    "onCustomEditor:aggo.dataSourceEditor",
-    "onCustomEditor:aggo.schemaEditor",
-    "onCustomEditor:aggo.cpnEditor",
-    "onCustomEditor:aggo.mcpEditor",
-    "onCustomEditor:aggo.colorEditor"
-  ],
   "main": "out/extension.js",
   "scripts": {
     "vscode:prepublish": "pnpm run build:core && pnpm run build && pnpm run build:webview",
@@ -103,6 +93,31 @@
         "*.cpn": "json",
         "*.mcp": "json",
         "*.color": "json"
+      }
+    },
+    "configuration": {
+      "title": "Aggo",
+      "properties": {
+        "aggo.runtime.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:5173",
+          "description": "Base URL of the running Aggo runtime (used for Run/Debug)."
+        },
+        "aggo.runtime.devScript": {
+          "type": "string",
+          "default": "dev",
+          "description": "Package.json script name to start the runtime dev server (e.g. dev)."
+        },
+        "aggo.runtime.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory to run the runtime dev script from (absolute or workspace-relative)."
+        },
+        "aggo.runtime.codegen.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, the extension generates/removes Next.js routes under the runtime app to match resources/page/**/*.page."
+        }
       }
     },
     "customEditors": [
@@ -208,6 +223,30 @@
       {
         "command": "aggo.uninstallComponent",
         "title": "Aggo: Uninstall Component"
+      },
+      {
+        "command": "aggo.openPageFromTree",
+        "title": "Aggo: Open Page"
+      },
+      {
+        "command": "aggo.runPageDev",
+        "title": "Aggo: Run Page (Dev)"
+      },
+      {
+        "command": "aggo.debugPageDev",
+        "title": "Aggo: Debug Page (Dev)"
+      },
+      {
+        "command": "aggo.refreshPages",
+        "title": "Aggo: Refresh Pages"
+      },
+      {
+        "command": "aggo.scaffoldNextjsRuntime",
+        "title": "Aggo: Scaffold Next.js Runtime"
+      },
+      {
+        "command": "aggo.syncNextjsRoutes",
+        "title": "Aggo: Sync Next.js Routes from Pages"
       }
     ],
     "menus": {
@@ -254,6 +293,35 @@
           "when": "editorLangId == json || editorLangId == jsonc",
           "group": "navigation"
         }
+      ],
+      "view/title": [
+        {
+          "command": "aggo.refreshPages",
+          "when": "view == aggo.pages",
+          "group": "navigation"
+        },
+        {
+          "command": "aggo.syncNextjsRoutes",
+          "when": "view == aggo.pages",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "aggo.openPageFromTree",
+          "when": "view == aggo.pages && viewItem == aggoPage",
+          "group": "navigation"
+        },
+        {
+          "command": "aggo.runPageDev",
+          "when": "view == aggo.pages && viewItem == aggoPage",
+          "group": "navigation"
+        },
+        {
+          "command": "aggo.debugPageDev",
+          "when": "view == aggo.pages && viewItem == aggoPage",
+          "group": "navigation"
+        }
       ]
     },
     "viewsContainers": {
@@ -267,6 +335,11 @@
     },
     "views": {
       "aggoActivity": [
+        {
+          "id": "aggo.pages",
+          "name": "Pages",
+          "icon": "media/aggo.svg"
+        },
         {
           "id": "aggo.library",
           "type": "webview",

@@ -1,4 +1,5 @@
 {
   "npm.packageManager": "pnpm",
-  "liveServer.settings.donotShowInfoMsg": true
+  "liveServer.settings.donotShowInfoMsg": true,
+  "chat.agent.maxRequests": 50
 }
