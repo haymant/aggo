@@ -4,8 +4,12 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "private": true,
-  "license": "MIT",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
   "scripts": {
     "build": "tsc -p ./tsconfig.json",
     "test": "node ./dist/test-core.js"

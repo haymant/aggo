@@ -2,6 +2,12 @@ import React from 'react';
 // Lightweight assert replacement to avoid Node core 'assert' import in the browser
 const assert = (cond: any, msg?: string) => { if (!cond) throw new Error(msg || 'assert failed'); };
 
+export type { AggoPageElement, AggoHandlers, AggoHandler, AggoHandlerContext, AggoStore } from './page/types';
+export { createAggoStore, AggoStoreProvider, useAggoStore, useAggoState } from './page/store';
+export { AggoElementRenderer, AggoPage } from './page/renderer';
+export type { AggoEditableElementRendererProps } from './page/editableRenderer';
+export { AggoEditableElementRenderer } from './page/editableRenderer';
+
 export type AggoComponentProps = {
   id?: string;
   attributes?: Record<string, any>;

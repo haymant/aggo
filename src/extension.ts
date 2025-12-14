@@ -9,11 +9,18 @@ import { AggoColorEditorProvider } from './editors/AggoColorEditorProvider';
 import { AggoCPNEditorProvider } from './editors/AggoCPNEditorProvider';
 import { AggoComponentLibraryProvider } from './views/AggoComponentLibraryProvider';
 import { AggoPropertyViewProvider } from './views/AggoPropertyViewProvider';
+import { AggoPagesTreeProvider } from './views/AggoPagesTreeProvider';
 import { parseJsonText, createSchemaFromJson } from './utils/schemaInference';
 import { getActivePanel } from './utils/activePanel';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as cp from 'child_process';
 import { getPanelByViewType } from './utils/activePanel';
+import { RuntimeServerManager } from './utils/runtimeServerManager';
+import { pageIdFromFsPath, pageUrlFromId } from './utils/pagePath';
+import { buildChromeLaunchConfig } from './utils/debugConfig';
+import { detectPackageManager } from './utils/packageManager';
+import { deleteRouteForPageId, ensureRouteForPageId, syncNextjsRoutes } from './utils/nextjsCodegen';
 
 // Broadcast component registry to all registered panels (library, page editor, properties)
 async function broadcastComponentRegistryToPanels() {
@@ -149,6 +156,407 @@ export function activate(context: vscode.ExtensionContext) {
       console.error(`Failed registering command ${commandId}`, err);
       try { vscode.window.showErrorMessage(`Aggo: failed to register command ${commandId}: ${err?.message || String(err)}`); } catch (_) { }
     }
+  }
+
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  const workspaceRoot = workspaceFolder?.uri.fsPath;
+
+  const runtimeManager = new RuntimeServerManager();
+  context.subscriptions.push({ dispose: () => { void runtimeManager.stop(); } });
+
+  let pagesProvider: AggoPagesTreeProvider | undefined;
+  if (workspaceRoot) {
+    pagesProvider = new AggoPagesTreeProvider(workspaceRoot);
+    context.subscriptions.push(pagesProvider);
+    const view = vscode.window.createTreeView(AggoPagesTreeProvider.viewId, {
+      treeDataProvider: pagesProvider,
+      showCollapseAll: true
+    });
+    context.subscriptions.push(view);
+  }
+
+  const resolveRuntimeSettings = () => {
+    const cfg = vscode.workspace.getConfiguration('aggo.runtime');
+    const baseUrl = cfg.get<string>('baseUrl') ?? 'http://localhost:5173';
+    const devScript = cfg.get<string>('devScript') ?? 'dev';
+
+    let cwd = workspaceRoot ?? process.cwd();
+    const cwdSetting = (cfg.get<string>('cwd') ?? '').trim();
+    if (cwdSetting) {
+      cwd = path.isAbsolute(cwdSetting) ? cwdSetting : (workspaceRoot ? path.join(workspaceRoot, cwdSetting) : path.resolve(cwdSetting));
+    }
+
+    return { baseUrl, devScript, cwd };
+  };
+
+  const isCodegenEnabled = (): boolean => {
+    const cfg = vscode.workspace.getConfiguration('aggo.runtime.codegen');
+    return cfg.get<boolean>('enabled') ?? false;
+  };
+
+  const resolveRuntimeCwdAbs = (): string | undefined => {
+    if (!workspaceRoot) return undefined;
+    const { cwd } = resolveRuntimeSettings();
+    return cwd;
+  };
+
+  const confirmInVscode = async (message: string, kind: 'overwrite' | 'delete'): Promise<boolean> => {
+    const action = kind === 'overwrite' ? 'Overwrite' : 'Delete';
+    const pick = await vscode.window.showWarningMessage(message, { modal: true }, action);
+    return pick === action;
+  };
+
+  const ensureRuntimeHasAggoCore = async (runtimeRootAbs: string, output?: vscode.OutputChannel): Promise<void> => {
+    if (!workspaceRoot) return;
+    const runtimePkgPath = path.join(runtimeRootAbs, 'package.json');
+    if (!fs.existsSync(runtimePkgPath)) return;
+
+    let runtimePkg: any;
+    try {
+      runtimePkg = JSON.parse(await fs.promises.readFile(runtimePkgPath, 'utf8'));
+    } catch {
+      return;
+    }
+
+    const deps = runtimePkg?.dependencies ?? {};
+    const devDeps = runtimePkg?.devDependencies ?? {};
+    if (deps['@aggo/core'] || devDeps['@aggo/core']) return;
+
+    const ok = await vscode.window.showInformationMessage(
+      'Aggo: Next.js runtime needs @aggo/core (page renderer) to render *.page routes. Install it now into the runtime project?',
+      { modal: true },
+      'Install'
+    );
+    if (ok !== 'Install') return;
+
+    const coreAbs = path.join(workspaceRoot, 'packages', 'core');
+    const rel = path.relative(runtimeRootAbs, coreAbs).split(path.sep).join('/');
+    const pm = detectPackageManager(runtimeRootAbs);
+
+    const cmd = pm === 'pnpm' ? 'pnpm' : pm === 'yarn' ? 'yarn' : 'npm';
+    const args = pm === 'pnpm'
+      ? ['add', `file:${rel}`]
+      : pm === 'yarn'
+        ? ['add', `file:${rel}`]
+        : ['install', '--save', rel];
+
+    output?.appendLine(`[aggo] Installing @aggo/core into runtime via: ${cmd} ${args.join(' ')}`);
+
+    await new Promise<void>((resolve, reject) => {
+      const child = cp.spawn(cmd, args, { cwd: runtimeRootAbs, env: process.env, stdio: 'pipe' });
+      child.on('error', reject);
+      child.stdout.on('data', (d) => output?.append(d.toString()));
+      child.stderr.on('data', (d) => output?.append(d.toString()));
+      child.on('exit', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`${cmd} exited with code ${code}`));
+      });
+    });
+  };
+
+  const asUri = (value: unknown): vscode.Uri | undefined => {
+    const v = value as any;
+    if (!v || typeof v !== 'object') return undefined;
+    if (typeof v.fsPath === 'string' && typeof v.scheme === 'string') return v as vscode.Uri;
+    return undefined;
+  };
+
+  const pickPageUri = (arg?: unknown): vscode.Uri | undefined => {
+    const direct = asUri(arg);
+    if (direct) return direct;
+
+    const v = arg as any;
+    const fromNode = asUri(v?.uri);
+    if (fromNode) return fromNode;
+
+    const fromTreeItem = asUri(v?.resourceUri);
+    if (fromTreeItem) return fromTreeItem;
+
+    const active = vscode.window.activeTextEditor;
+    return active?.document?.uri;
+  };
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.refreshPages', () => {
+    pagesProvider?.refresh();
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.syncNextjsRoutes', async () => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+    const runtimeCwdAbs = resolveRuntimeCwdAbs();
+    if (!runtimeCwdAbs) {
+      vscode.window.showErrorMessage('Aggo: runtime cwd is not configured.');
+      return;
+    }
+
+    const pages = await vscode.workspace.findFiles(new vscode.RelativePattern(workspaceRoot, 'resources/page/**/*.page'));
+    const pageIds = pages.map((u) => pageIdFromFsPath(workspaceRoot, u.fsPath));
+
+    // Routes import @aggo/core via generated renderer wrapper. Ensure runtime has it.
+    try {
+      await ensureRuntimeHasAggoCore(runtimeCwdAbs);
+    } catch (err: any) {
+      vscode.window.showWarningMessage(`Aggo: failed to install @aggo/core into runtime: ${err?.message || String(err)}`);
+    }
+
+    await syncNextjsRoutes(
+      {
+        workspaceRoot,
+        runtimeCwdAbs,
+        confirm: confirmInVscode
+      },
+      pageIds
+    );
+
+    vscode.window.showInformationMessage('Aggo: Next.js routes synced.');
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.openPageFromTree', async (arg?: unknown) => {
+    const pageUri = pickPageUri(arg);
+    if (!pageUri) return;
+    await vscode.commands.executeCommand('vscode.openWith', pageUri, 'aggo.pageEditor');
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.runPageDev', async (arg?: unknown) => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+
+    const pageUri = pickPageUri(arg);
+    if (!pageUri || typeof pageUri.fsPath !== 'string' || !pageUri.fsPath.endsWith('.page')) {
+      vscode.window.showErrorMessage('Aggo: select a .page file to run.');
+      return;
+    }
+
+    const { baseUrl, devScript, cwd } = resolveRuntimeSettings();
+    await runtimeManager.ensureStarted({ kind: 'dev', workspaceRoot, cwd, script: devScript });
+
+    const pageId = pageIdFromFsPath(workspaceRoot, pageUri.fsPath);
+    const url = pageUrlFromId(baseUrl, pageId);
+    await vscode.env.openExternal(vscode.Uri.parse(url));
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.debugPageDev', async (arg?: unknown) => {
+    if (!workspaceRoot || !workspaceFolder) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+
+    const pageUri = pickPageUri(arg);
+    if (!pageUri || typeof pageUri.fsPath !== 'string' || !pageUri.fsPath.endsWith('.page')) {
+      vscode.window.showErrorMessage('Aggo: select a .page file to debug.');
+      return;
+    }
+
+    const { baseUrl, devScript, cwd } = resolveRuntimeSettings();
+    await runtimeManager.ensureStarted({ kind: 'dev', workspaceRoot, cwd, script: devScript });
+
+    const pageId = pageIdFromFsPath(workspaceRoot, pageUri.fsPath);
+    const url = pageUrlFromId(baseUrl, pageId);
+    await vscode.debug.startDebugging(workspaceFolder, buildChromeLaunchConfig({ url, workspaceFolder }));
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.scaffoldNextjsRuntime', async () => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+
+    const targetRel = await vscode.window.showInputBox({
+      prompt: 'Next.js runtime folder (workspace-relative) to create',
+      value: 'aggo-runtime'
+    });
+    if (!targetRel) return;
+
+    const targetRelNormalized = targetRel.split(path.sep).join('/').replace(/^\/+/, '');
+    const targetAbs = path.isAbsolute(targetRel) ? targetRel : path.join(workspaceRoot, targetRel);
+
+    if (fs.existsSync(targetAbs)) {
+      const entries = fs.readdirSync(targetAbs);
+      if (entries.length > 0) {
+        const ok = await vscode.window.showWarningMessage(
+          `Folder already exists and is not empty: ${targetRelNormalized}. Continue and let create-next-app manage it?`,
+          { modal: true },
+          'Continue'
+        );
+        if (ok !== 'Continue') return;
+      }
+    }
+
+    const output = vscode.window.createOutputChannel('Aggo: Scaffold');
+    output.show(true);
+
+    const pm = detectPackageManager(workspaceRoot);
+    const useFlag = pm === 'pnpm' ? '--use-pnpm' : pm === 'yarn' ? '--use-yarn' : '--use-npm';
+    const command = pm === 'pnpm' ? 'pnpm' : pm === 'yarn' ? 'npx' : 'npx';
+    const args = pm === 'pnpm'
+      ? ['dlx', 'create-next-app@latest', targetAbs]
+      : ['create-next-app@latest', targetAbs];
+
+    const nextArgs = [
+      ...args,
+      '--ts',
+      '--tailwind',
+      '--eslint',
+      '--app',
+      '--src-dir',
+      '--import-alias',
+      '@/*',
+      '--yes',
+      useFlag
+    ];
+
+    output.appendLine(`[aggo] Scaffolding Next.js runtime in: ${targetAbs}`);
+    output.appendLine(`[aggo] Running: ${command} ${nextArgs.join(' ')}`);
+
+    const run = () => new Promise<void>((resolve, reject) => {
+      const child = cp.spawn(command, nextArgs, {
+        cwd: workspaceRoot,
+        env: process.env,
+        stdio: 'pipe'
+      });
+      child.on('error', reject);
+      child.stdout.on('data', (d) => output.append(d.toString()));
+      child.stderr.on('data', (d) => output.append(d.toString()));
+      child.on('exit', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`create-next-app exited with code ${code}`));
+      });
+    });
+
+    try {
+      await run();
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Aggo: failed to scaffold Next.js runtime: ${err?.message || String(err)}`);
+      return;
+    }
+
+    // Ensure runtime has the shared renderer package.
+    try {
+      await ensureRuntimeHasAggoCore(targetAbs, output);
+    } catch (err: any) {
+      vscode.window.showWarningMessage(`Aggo: failed to install @aggo/core into runtime: ${err?.message || String(err)}`);
+    }
+
+    // Update workspace settings so Run/Debug knows where and what to run.
+    const runtimeCfg = vscode.workspace.getConfiguration('aggo.runtime');
+    await runtimeCfg.update('cwd', targetRelNormalized, vscode.ConfigurationTarget.Workspace);
+    await runtimeCfg.update('baseUrl', 'http://localhost:3000', vscode.ConfigurationTarget.Workspace);
+    await runtimeCfg.update('devScript', 'dev', vscode.ConfigurationTarget.Workspace);
+
+    const codegenCfg = vscode.workspace.getConfiguration('aggo.runtime.codegen');
+    await codegenCfg.update('enabled', true, vscode.ConfigurationTarget.Workspace);
+
+    // Create/merge a launch.json for manual debugging flows.
+    try {
+      const vscodeDir = path.join(workspaceRoot, '.vscode');
+      await fs.promises.mkdir(vscodeDir, { recursive: true });
+      const launchPath = path.join(vscodeDir, 'launch.json');
+
+      let launch: any = { version: '0.2.0', configurations: [], inputs: [] };
+      if (fs.existsSync(launchPath)) {
+        try {
+          launch = JSON.parse(await fs.promises.readFile(launchPath, 'utf8'));
+        } catch {
+          // keep default structure; don't overwrite invalid JSON
+          launch = { version: '0.2.0', configurations: [], inputs: [] };
+        }
+      }
+
+      if (!Array.isArray(launch.configurations)) launch.configurations = [];
+      if (!Array.isArray(launch.inputs)) launch.inputs = [];
+
+      if (!launch.inputs.some((i: any) => i?.id === 'aggoPageId')) {
+        launch.inputs.push({
+          id: 'aggoPageId',
+          type: 'promptString',
+          description: 'Aggo page id (e.g. rfq/view)',
+          default: 'rfq/view'
+        });
+      }
+
+      if (!launch.configurations.some((c: any) => c?.name === 'Aggo: Debug Page (Dev)')) {
+        launch.configurations.push({
+          name: 'Aggo: Debug Page (Dev)',
+          type: 'pwa-chrome',
+          request: 'launch',
+          url: 'http://localhost:3000/aggo/page/${input:aggoPageId}',
+          webRoot: '${workspaceFolder}/' + targetRelNormalized,
+          sourceMaps: true
+        });
+      }
+
+      await fs.promises.writeFile(launchPath, JSON.stringify(launch, null, 2), 'utf8');
+    } catch (err) {
+      output.appendLine(`\n[aggo] Failed to create/merge .vscode/launch.json: ${String(err)}`);
+    }
+
+    vscode.window.showInformationMessage('Aggo: Next.js runtime scaffolded. Settings + launch.json updated.');
+
+    // Generate initial routes for any existing *.page files.
+    try {
+      await vscode.commands.executeCommand('aggo.syncNextjsRoutes');
+    } catch (err) {
+      output.appendLine(`\n[aggo] Failed to sync Next.js routes after scaffolding: ${String(err)}`);
+    }
+  }));
+
+  // Optional: keep Next.js routes in sync with resources/page changes.
+  if (workspaceRoot) {
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceRoot, 'resources/page/**/*.page')
+    );
+
+    const handleCreate = async (uri: vscode.Uri) => {
+      if (!isCodegenEnabled()) return;
+      const runtimeCwdAbs = resolveRuntimeCwdAbs();
+      if (!runtimeCwdAbs) return;
+      const id = pageIdFromFsPath(workspaceRoot, uri.fsPath);
+      await ensureRouteForPageId(
+        {
+          workspaceRoot,
+          runtimeCwdAbs,
+          confirm: confirmInVscode
+        },
+        id
+      );
+
+      // Also refresh the handler registry (derived from all current pages).
+      const pages = await vscode.workspace.findFiles(new vscode.RelativePattern(workspaceRoot, 'resources/page/**/*.page'));
+      const pageIds = pages.map((u) => pageIdFromFsPath(workspaceRoot, u.fsPath));
+      await syncNextjsRoutes({ workspaceRoot, runtimeCwdAbs, confirm: confirmInVscode }, pageIds);
+    };
+
+    const handleDelete = async (uri: vscode.Uri) => {
+      if (!isCodegenEnabled()) return;
+      const runtimeCwdAbs = resolveRuntimeCwdAbs();
+      if (!runtimeCwdAbs) return;
+      const id = pageIdFromFsPath(workspaceRoot, uri.fsPath);
+      await deleteRouteForPageId(
+        {
+          workspaceRoot,
+          runtimeCwdAbs,
+          confirm: confirmInVscode
+        },
+        id
+      );
+
+      // Also refresh the handler registry (derived from all current pages).
+      const pages = await vscode.workspace.findFiles(new vscode.RelativePattern(workspaceRoot, 'resources/page/**/*.page'));
+      const pageIds = pages.map((u) => pageIdFromFsPath(workspaceRoot, u.fsPath));
+      await syncNextjsRoutes({ workspaceRoot, runtimeCwdAbs, confirm: confirmInVscode }, pageIds);
+    };
+
+    watcher.onDidCreate((u) => {
+      void handleCreate(u);
+    });
+    watcher.onDidDelete((u) => {
+      void handleDelete(u);
+    });
+    context.subscriptions.push(watcher);
   }
 
   // Register an 'Infer Schema from JSON' command usable from editor context menus

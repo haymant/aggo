@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom/client';
+import { jsx as jsxRuntimeJsx, jsxs as jsxRuntimeJsxs, Fragment as jsxRuntimeFragment } from 'react/jsx-runtime';
 import { parse as parseJsonc } from 'jsonc-parser';
 // Delay loading jsonjoy builder to avoid pulling it into the initial bundle
 // which ajv/jsonjoy may use `new Function` and break under the webview CSP.
@@ -34,7 +35,19 @@ const App: React.FC = () => {
 
   React.useEffect(() => {
     // Expose React and ReactDOM globally for plugin artifacts that rely on window.React
-    try { (window as any).React = React; (window as any).ReactDOM = ReactDOM; } catch (err) { /* ignore */ }
+    try {
+      (window as any).React = React;
+      (window as any).ReactDOM = ReactDOM;
+      // Expose JSX runtime helpers for plugin bundles that are compiled with the
+      // automatic JSX runtime and expect globals.
+      (window as any).jsx = jsxRuntimeJsx;
+      (window as any).jsxs = jsxRuntimeJsxs;
+      (window as any).Fragment = jsxRuntimeFragment;
+      // Compatibility: some prebuilt plugin artifacts alias `jsx` to a short name like `s`.
+      (window as any).s = jsxRuntimeJsx;
+    } catch (err) {
+      /* ignore */
+    }
     const handler = (ev: MessageEvent) => {
       const data = ev.data as InitMessage;
       if (data?.type === 'init') {
@@ -266,7 +279,11 @@ const App: React.FC = () => {
   }
   if (state.viewType === 'aggo.pageEditor') {
     // Page editor doesn't require aggo-schema-editor so it stays lightweight
-    return <PageCanvas data={schema as any} onChange={handleChange} />;
+    return (
+      <ErrorBoundary>
+        <PageCanvas data={schema as any} onChange={handleChange} />
+      </ErrorBoundary>
+    );
   }
 
   if (state.viewType === 'aggo.schemaEditor' || state.viewType === 'aggo.cpnEditor' || state.viewType === 'aggo.mcpEditor' || state.viewType === 'aggo.colorEditor') {

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@aggo/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@radix-ui/react-tabs':
         specifier: ^1.0.0
         version: 1.1.13(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -69,6 +72,17 @@ importers:
       vite:
         specifier: ^7.2.4
         version: 7.2.4(@types/node@22.19.1)(jiti@2.6.1)(lightningcss@1.30.2)
+
+  packages/core:
+    dependencies:
+      react:
+        specifier: ^18 || ^19
+        version: 19.2.0
+      react-dom:
+        specifier: ^18 || ^19
+        version: 19.2.0(react@19.2.0)
+
+  packages/hello-plugin: {}
 
 packages:
 
