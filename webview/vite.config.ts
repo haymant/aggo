@@ -21,7 +21,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        cpn: path.resolve(__dirname, 'cpn.html')
+        cpn: path.resolve(__dirname, 'cpn.html'),
+        graphql: path.resolve(__dirname, 'graphql.html')
       },
       output: {
         entryFileNames: `[name].webview.js`,
@@ -32,13 +33,11 @@ export default defineConfig({
   server: {
     // Port can be overridden via environment variable VITE_DEV_SERVER_PORT or VITE_DEV_SERVER_URL
     port: Number(process.env.VITE_DEV_SERVER_PORT || (process.env.VITE_DEV_SERVER_URL ? new URL(process.env.VITE_DEV_SERVER_URL).port : undefined)) || 5173,
-    // Allow fallback if port is taken (useful for developer machines where 5173 is occupied)
-    strictPort: Boolean(process.env.VITE_DEV_STRICT_PORT) || false,
-    cors: {
-      origin: '*',
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      credentials: true
-    },
+    // IMPORTANT: the extension hardcodes localhost:5173 as the default dev server URL.
+    // If Vite auto-picks another port, the webview will try the wrong port and fail.
+    strictPort: true,
+    // Allow vscode-webview:// origins to load modules from the dev server.
+    cors: true,
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',

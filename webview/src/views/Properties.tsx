@@ -4,6 +4,7 @@ import builtins from '@aggo/core';
 
 type ElementData = {
   id: string;
+  __aggoKind?: string;
   tagName?: string;
   attributes?: Record<string, string>;
   styles?: Record<string, string>;
@@ -14,6 +15,139 @@ type ElementData = {
   type?: string;
   data?: any;
   isEdge?: boolean;
+  // GraphQL selection (visual GraphQL editor)
+  selectionType?: 'none' | 'type' | 'field';
+  schemaUri?: string;
+  typeName?: string;
+  fieldName?: string;
+  fieldType?: string;
+  directives?: {
+    http?: { url?: string; method?: string };
+    resolver?: { name?: string };
+  };
+};
+
+const GraphqlProperties: React.FC<{ element: ElementData }> = ({ element }) => {
+  const typeName = (element.typeName || '').trim();
+  const fieldName = (element.fieldName || '').trim();
+
+  const [httpUrl, setHttpUrl] = useState<string>(element.directives?.http?.url || '');
+  const [httpMethod, setHttpMethod] = useState<string>(element.directives?.http?.method || 'GET');
+  const [resolverId, setResolverId] = useState<string>(element.directives?.resolver?.name || '');
+
+  useEffect(() => {
+    setHttpUrl(element.directives?.http?.url || '');
+    setHttpMethod(element.directives?.http?.method || 'GET');
+    setResolverId(element.directives?.resolver?.name || '');
+  }, [element.id]);
+
+  const canEditField = element.selectionType === 'field' && !!typeName && !!fieldName;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex border-b border-border px-4 py-2">
+        <div className="text-xs font-medium">GraphQL</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="space-y-1">
+          <div className="text-xs text-muted-foreground">Selected</div>
+          {element.selectionType === 'none' ? (
+            <div className="text-sm">Nothing selected</div>
+          ) : element.selectionType === 'type' ? (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Type:</span> <strong>{typeName || '—'}</strong>
+            </div>
+          ) : (
+            <div className="text-sm">
+              <div><span className="text-muted-foreground">Type:</span> <strong>{typeName || '—'}</strong></div>
+              <div><span className="text-muted-foreground">Field:</span> <strong>{fieldName || '—'}</strong>{element.fieldType ? <span className="text-muted-foreground"> : {element.fieldType}</span> : null}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs font-bold">@http</div>
+          <div className="space-y-2">
+            <input
+              type="text"
+              className="w-full p-1 text-xs bg-background border border-input rounded"
+              placeholder="URL"
+              value={httpUrl}
+              onChange={(e) => setHttpUrl(e.target.value)}
+              disabled={!canEditField}
+            />
+            <input
+              type="text"
+              className="w-full p-1 text-xs bg-background border border-input rounded"
+              placeholder="Method (GET)"
+              value={httpMethod}
+              onChange={(e) => setHttpMethod(e.target.value)}
+              disabled={!canEditField}
+            />
+            <button
+              type="button"
+              className="w-full py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 disabled:opacity-50"
+              disabled={!canEditField || !httpUrl.trim()}
+              onClick={() => {
+                vscode.postMessage({
+                  type: 'graphqlApplyDirective',
+                  schemaUri: element.schemaUri,
+                  typeName,
+                  fieldName,
+                  directiveName: 'http',
+                  args: { url: httpUrl.trim(), method: (httpMethod || 'GET').trim() }
+                });
+              }}
+            >
+              Apply @http
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs font-bold">@resolver</div>
+          <div className="space-y-2">
+            <input
+              type="text"
+              className="w-full p-1 text-xs bg-background border border-input rounded"
+              placeholder="Resolver id (e.g. User_posts)"
+              value={resolverId}
+              onChange={(e) => setResolverId(e.target.value)}
+              disabled={!canEditField}
+            />
+            <button
+              type="button"
+              className="w-full py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 disabled:opacity-50"
+              disabled={!canEditField || !resolverId.trim()}
+              onClick={() => {
+                vscode.postMessage({
+                  type: 'graphqlApplyDirective',
+                  schemaUri: element.schemaUri,
+                  typeName,
+                  fieldName,
+                  directiveName: 'resolver',
+                  args: { name: resolverId.trim() }
+                });
+              }}
+            >
+              Apply @resolver
+            </button>
+            <button
+              type="button"
+              className="w-full py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 disabled:opacity-50"
+              disabled={!resolverId.trim()}
+              onClick={() => {
+                vscode.postMessage({ type: 'graphqlScaffoldResolver', schemaUri: element.schemaUri, resolverId: resolverId.trim() });
+              }}
+            >
+              Scaffold resolver stub
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const SpaceSVG: React.FC<{ styles: Record<string, string>; onEdit: (prop: string, val: string) => void }> = ({ styles, onEdit }) => {
@@ -392,6 +526,7 @@ export const Properties: React.FC = () => {
 
   const updateElement = (updates: Partial<ElementData>) => {
     if (!element) return;
+    if (element.__aggoKind === 'graphql') return;
     const newElement = { ...element, ...updates };
     setElement(newElement);
     vscode.postMessage({ type: "updateElement", element: newElement });
@@ -455,6 +590,11 @@ export const Properties: React.FC = () => {
         Select an element to view properties
       </div>
     );
+  }
+
+  // GraphQL Selection Handling (GraphQL visual editor)
+  if (element.__aggoKind === 'graphql') {
+    return <GraphqlProperties element={element} />;
   }
 
   // CPN Element Handling

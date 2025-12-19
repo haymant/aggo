@@ -8,6 +8,7 @@ import { detectPackageManager, buildRunScriptCommand } from '../utils/packageMan
 import { buildChromeLaunchConfig } from '../utils/debugConfig';
 import { AGGO_GENERATED_TAG, isAggoGeneratedFile, routeDirForPageId } from '../utils/nextjsCodegen';
 import { extractLocalhostBaseUrl } from '../utils/runtimeBaseUrl';
+import { computeSchemaPathLiteral, upsertResolverRegion } from '../utils/graphqlResolverScaffold';
 
 function testPageIdFromFsPath() {
   const root = '/ws';
@@ -57,6 +58,40 @@ function testRuntimeBaseUrlExtraction() {
   assert.equal(extractLocalhostBaseUrl('no url here'), undefined);
 }
 
+function testGraphqlResolverScaffoldCreate() {
+  const { updated, changed } = upsertResolverRegion('', ['User.me', 'Query.ping']);
+  assert.equal(changed, true);
+  assert.ok(updated.includes('export const resolverRegistry'));
+  assert.ok(updated.includes('User.me'));
+  assert.ok(updated.includes('Query.ping'));
+}
+
+function testGraphqlResolverScaffoldUpsertRegionOnly() {
+  const existing = [
+    '// some header',
+    'const keep = true;',
+    `// ${AGGO_GENERATED_TAG}-graphql-resolvers-start`,
+    '  "Old.one": async () => null,',
+    `// ${AGGO_GENERATED_TAG}-graphql-resolvers-end`,
+    'export const tail = 123;',
+  ].join('\n');
+
+  const { updated, changed } = upsertResolverRegion(existing, ['New.two']);
+  assert.equal(changed, true);
+  assert.ok(updated.includes('const keep = true;'));
+  assert.ok(updated.includes('export const tail = 123;'));
+  assert.ok(updated.includes('New.two'));
+  assert.ok(!updated.includes('Old.one'));
+}
+
+function testGraphqlSchemaPathLiteral() {
+  const lit = computeSchemaPathLiteral({
+    runtimeRootAbs: '/repo/runtime',
+    schemaFsPath: '/repo/runtime/src/schema.graphql',
+  });
+  assert.equal(lit, './src/schema.graphql');
+}
+
 function main() {
   const tests: Array<[string, () => void]> = [
     ['pageIdFromFsPath', testPageIdFromFsPath],
@@ -65,7 +100,10 @@ function main() {
     ['buildRunScriptCommand', testBuildRunScriptCommand],
     ['buildChromeLaunchConfig', testBuildDebugConfig],
     ['nextjsCodegenHelpers', testNextjsCodegenHelpers],
-    ['runtimeBaseUrlExtraction', testRuntimeBaseUrlExtraction]
+    ['runtimeBaseUrlExtraction', testRuntimeBaseUrlExtraction],
+    ['graphqlResolverScaffoldCreate', testGraphqlResolverScaffoldCreate],
+    ['graphqlResolverScaffoldUpsertRegionOnly', testGraphqlResolverScaffoldUpsertRegionOnly],
+    ['graphqlSchemaPathLiteral', testGraphqlSchemaPathLiteral]
   ];
 
   let failed = 0;

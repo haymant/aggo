@@ -310,6 +310,29 @@ export class AggoPropertyViewProvider implements vscode.WebviewViewProvider {
         }
       } else if (message.type === 'updateElement') {
         vscode.commands.executeCommand('aggo.updateElement', message.element);
+      } else if (message.type === 'graphqlApplyDirective') {
+        // Ask the active editor (GraphQL visual editor) to apply directives to its in-memory SDL,
+        // then it will emit an 'update' back to the extension to persist.
+        vscode.commands.executeCommand('aggo.graphqlApplyDirective', {
+          schemaUri: message?.schemaUri,
+          typeName: message?.typeName,
+          fieldName: message?.fieldName,
+          directiveName: message?.directiveName,
+          args: message?.args,
+        });
+      } else if (message.type === 'graphqlScaffoldResolver') {
+        // Delegate to runtime sync, same behavior as the GraphQL editor webview button.
+        try {
+          const resolverId = typeof message?.resolverId === 'string' ? message.resolverId.trim() : '';
+          if (!resolverId) throw new Error('Missing resolverId');
+          const schemaUri = typeof message?.schemaUri === 'string' && message.schemaUri ? message.schemaUri : undefined;
+          await vscode.commands.executeCommand('aggo.syncGraphqlRuntime', {
+            schemaPathOrUri: schemaUri,
+            resolverIds: [resolverId],
+          });
+        } catch (err) {
+          console.warn('[aggo] failed scaffolding resolver from property view', err);
+        }
       } else if (message.type === 'requestHandlers') {
         const pageId = (message?.pageId as string | undefined) || '';
         const requestId = message?.id;

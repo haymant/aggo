@@ -7,6 +7,7 @@ import { AggoDataSourceEditorProvider } from './editors/AggoDataSourceEditorProv
 import { AggoMcpEditorProvider } from './editors/AggoMcpEditorProvider';
 import { AggoColorEditorProvider } from './editors/AggoColorEditorProvider';
 import { AggoCPNEditorProvider } from './editors/AggoCPNEditorProvider';
+import { AggoGraphqlEditorProvider } from './editors/AggoGraphqlEditorProvider';
 import { AggoComponentLibraryProvider } from './views/AggoComponentLibraryProvider';
 import { AggoPropertyViewProvider } from './views/AggoPropertyViewProvider';
 import { AggoPagesTreeProvider } from './views/AggoPagesTreeProvider';
@@ -21,6 +22,7 @@ import { pageIdFromFsPath, pageUrlFromId } from './utils/pagePath';
 import { buildChromeLaunchConfig } from './utils/debugConfig';
 import { detectPackageManager } from './utils/packageManager';
 import { deleteRouteForPageId, ensureRouteForPageId, syncNextjsRoutes } from './utils/nextjsCodegen';
+import { syncGraphqlRuntimeAddons } from './utils/graphqlRuntimeCodegen';
 
 // Broadcast component registry to all registered panels (library, page editor, properties)
 async function broadcastComponentRegistryToPanels() {
@@ -85,13 +87,15 @@ async function broadcastComponentRegistryToPanels() {
 export function activate(context: vscode.ExtensionContext) {
   try {
     console.log('Aggo Builder extension activating.');
+  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
   const viewTypes = [
     { viewType: 'aggo.pageEditor', ext: '.page', title: 'Aggo Page Editor' },
     { viewType: 'aggo.dataSourceEditor', ext: '.ds', title: 'Aggo DataSource Editor' },
     { viewType: 'aggo.schemaEditor', ext: '.schema', title: 'Aggo Schema Editor' },
     { viewType: 'aggo.cpnEditor', ext: '.cpn', title: 'Aggo CPN Editor' },
     { viewType: 'aggo.mcpEditor', ext: '.mcp', title: 'Aggo MCP Editor' },
-    { viewType: 'aggo.colorEditor', ext: '.color', title: 'Aggo Color Editor' }
+    { viewType: 'aggo.colorEditor', ext: '.color', title: 'Aggo Color Editor' },
+    { viewType: 'aggo.graphqlEditor', ext: '.graphql', title: 'Aggo GraphQL Editor' }
   ];
 
   const commandMap: {[key: string]: string} = {
@@ -100,12 +104,11 @@ export function activate(context: vscode.ExtensionContext) {
     'aggo.schemaEditor': 'aggo.openAggoSchemaEditor',
     'aggo.cpnEditor': 'aggo.openAggoCPNEditor',
     'aggo.mcpEditor': 'aggo.openAggoMCPEditor',
-    'aggo.colorEditor': 'aggo.openAggoColorEditor'
+    'aggo.colorEditor': 'aggo.openAggoColorEditor',
+    'aggo.graphqlEditor': 'aggo.openAggoGraphqlEditor'
   };
 
   for (const vt of viewTypes) {
-    // const isDev = context.extensionMode === vscode.ExtensionMode.Development;
-    const isDev = false; // Force production mode
     let provider: vscode.CustomTextEditorProvider;
     switch (vt.viewType) {
       case 'aggo.cpnEditor':
@@ -125,6 +128,9 @@ export function activate(context: vscode.ExtensionContext) {
         break;
       case 'aggo.colorEditor':
         provider = new AggoColorEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
+        break;
+      case 'aggo.graphqlEditor':
+        provider = new AggoGraphqlEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);
         break;
       default:
         // fallback - use AggoSchemaEditorProvider for other view types
@@ -358,6 +364,26 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     vscode.window.showInformationMessage('Aggo: Next.js routes synced.');
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.syncGraphqlRuntime', async (arg?: unknown) => {
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('Aggo: no workspace folder is open.');
+      return;
+    }
+    const runtimeCwdAbs = resolveRuntimeCwdAbs();
+    if (!runtimeCwdAbs) {
+      vscode.window.showErrorMessage('Aggo: runtime cwd is not configured.');
+      return;
+    }
+
+    // Optional: allow passing a schema path/uri for schema path wiring.
+    const schemaPathOrUri = (arg as any)?.schemaPathOrUri as string | undefined;
+    const resolverIds = Array.isArray((arg as any)?.resolverIds) ? (arg as any).resolverIds.filter((x: any) => typeof x === 'string') : [];
+
+    await syncGraphqlRuntimeAddons({ workspaceRoot, runtimeCwdAbs, confirm: confirmInVscode }, schemaPathOrUri, resolverIds);
+
+    vscode.window.showInformationMessage('Aggo: GraphQL runtime addons synced.');
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('aggo.openPageFromTree', async (arg?: unknown) => {
@@ -895,6 +921,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
   }));
 
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.graphqlApplyDirective', (payload) => {
+    const active = getActivePanel();
+    if (active) {
+      active.webview.postMessage({ type: 'graphqlApplyDirective', ...(payload || {}) });
+    }
+  }));
+
   // Diagnostics collection for validation results
   const validationDiagnostics = vscode.languages.createDiagnosticCollection('aggoValidation');
   context.subscriptions.push(validationDiagnostics);
@@ -1072,8 +1105,6 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // Register Activity Bar views
-  // Force production mode to ensure we use the built assets from media/
-  const isDev = false; 
   const libraryProvider = new AggoComponentLibraryProvider(context.extensionUri, isDev);
   const propertyProvider = new AggoPropertyViewProvider(context.extensionUri, isDev);
   try {

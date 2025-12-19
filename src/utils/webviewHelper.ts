@@ -6,17 +6,21 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
     let scriptUri: vscode.Uri | string;
     let styleUri: vscode.Uri | string | undefined;
     let mainCssUri: vscode.Uri | string | undefined;
+  let vendorCssUri: vscode.Uri | string | undefined;
     
     // Use the Vite dev server when the extension is running in development mode.
     const useDevServer = isDev;
     const devServer = getDevServer();
 
+    const devEntry = viewType === 'aggo.graphqlEditor' ? '/src/graphql/index.tsx' : '/src/index.tsx';
+    const prodBundle = viewType === 'aggo.graphqlEditor' ? 'graphql.webview.js' : 'main.webview.js';
+
     if (useDevServer) {
       // Vite dev server, allow overriding host/port via VITE_DEV_SERVER_URL
-      scriptUri = `${devServer.httpUrl}/src/index.tsx`;
+      scriptUri = `${devServer.httpUrl}${devEntry}`;
       styleUri = `${devServer.httpUrl}/src/styles/index.css`;
     } else {
-      const scriptPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'main.webview.js');
+      const scriptPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', prodBundle);
       let scriptWebUri = webview.asWebviewUri(scriptPathOnDisk).toString();
       try {
         const mtimeMs = fs.statSync(scriptPathOnDisk.fsPath).mtimeMs;
@@ -29,8 +33,10 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
       scriptUri = scriptWebUri;
         const cssPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'index.css');
         const mainCssPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'main.css');
+        const vendorCssPathOnDisk = vscode.Uri.joinPath(extensionUri, 'media', 'style.css');
         let mainCssWebUri = webview.asWebviewUri(mainCssPathOnDisk).toString();
         let styleWebUri = webview.asWebviewUri(cssPathOnDisk).toString();
+        let vendorCssWebUri = webview.asWebviewUri(vendorCssPathOnDisk).toString();
         try {
           const mtimeMs = fs.statSync(mainCssPathOnDisk.fsPath).mtimeMs;
           if (Number.isFinite(mtimeMs)) {
@@ -49,6 +55,21 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
         }
         mainCssUri = mainCssWebUri;
         styleUri = styleWebUri;
+
+        // Vite may emit shared CSS (e.g. from node_modules) as style.css.
+        // Because we bypass Vite's generated HTML and load the entry JS directly,
+        // we need to explicitly include this stylesheet if it exists.
+        try {
+          if (fs.existsSync(vendorCssPathOnDisk.fsPath)) {
+            const mtimeMs = fs.statSync(vendorCssPathOnDisk.fsPath).mtimeMs;
+            if (Number.isFinite(mtimeMs)) {
+              vendorCssWebUri = `${vendorCssWebUri}${vendorCssWebUri.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(mtimeMs))}`;
+            }
+            vendorCssUri = vendorCssWebUri;
+          }
+        } catch {
+          // ignore
+        }
     }
 
     const nonce = getNonce();
@@ -60,10 +81,11 @@ export function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.
       <html lang="en" class="${initialTheme}">
         <head>
           <meta charset="utf-8" />
-          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${useDevServer ? `script-src ${devServer.httpUrl} 'unsafe-inline' ${requiresUnsafeEval ? "'unsafe-eval'" : ''}; style-src ${devServer.httpUrl} 'unsafe-inline'; connect-src ${devServer.httpUrl} ${devServer.wsUrl};` : `script-src 'nonce-${nonce}' ${webview.cspSource} ${requiresUnsafeEval ? "'unsafe-eval'" : ''}; style-src ${webview.cspSource} 'unsafe-inline'; connect-src ${webview.cspSource};`} img-src ${webview.cspSource} https: data:;" />
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${useDevServer ? `script-src ${devServer.httpUrl} 'unsafe-inline' ${requiresUnsafeEval ? "'unsafe-eval'" : ''}; style-src ${devServer.httpUrl} 'unsafe-inline'; connect-src ${devServer.httpUrl} ${devServer.wsUrl}; worker-src ${devServer.httpUrl} blob:;` : `script-src 'nonce-${nonce}' ${webview.cspSource} ${requiresUnsafeEval ? "'unsafe-eval'" : ''}; style-src ${webview.cspSource} 'unsafe-inline'; connect-src ${webview.cspSource}; worker-src ${webview.cspSource} blob:;`} img-src ${webview.cspSource} https: data:;" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           ${styleUri ? `<link rel="stylesheet" href="${styleUri}">` : ''}
           ${mainCssUri ? `<link rel="stylesheet" href="${mainCssUri}">` : ''}
+          ${vendorCssUri ? `<link rel="stylesheet" href="${vendorCssUri}">` : ''}
           <title>${title}</title>
         </head>
         <body class="${initialTheme}">

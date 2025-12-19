@@ -76,6 +76,8 @@
     "@xyflow/react": "^12.9.3",
     "aggo-schema-editor": "^0.2.4",
     "ajv": "8.17.1",
+    "elkjs": "^0.11.0",
+    "graphql": "^16.11.0",
     "jsonc-parser": "^3.0.0",
     "lucide-react": "^0.556.0",
     "react": "^19.0.0",
@@ -181,6 +183,19 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "aggo.graphqlEditor",
+        "displayName": "Aggo GraphQL Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.graphql"
+          },
+          {
+            "filenamePattern": "*.gql"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "commands": [
@@ -209,14 +224,17 @@
         "title": "Open with Aggo Color Editor"
       },
       {
+        "command": "aggo.openAggoGraphqlEditor",
+        "title": "Open with Aggo GraphQL Editor"
+      },
+      {
         "command": "aggo.inferSchemaFromJson",
         "title": "Aggo: Infer Schema from JSON"
       },
       {
         "command": "aggo.validateAgainstSchema",
         "title": "Aggo: Validate against JSON Schema"
-      }
-      ,
+      },
       {
         "command": "aggo.installComponent",
         "title": "Aggo: Install Component from JS bundle"
@@ -264,6 +282,10 @@
       {
         "command": "aggo.syncNextjsRoutes",
         "title": "Aggo: Sync Next.js Routes from Pages"
+      },
+      {
+        "command": "aggo.syncGraphqlRuntime",
+        "title": "Aggo: Sync GraphQL Runtime Addons"
       }
     ],
     "menus": {
@@ -296,6 +318,11 @@
         {
           "command": "aggo.openAggoColorEditor",
           "when": "resourceExtname == .color",
+          "group": "navigation"
+        },
+        {
+          "command": "aggo.openAggoGraphqlEditor",
+          "when": "resourceExtname == .graphql || resourceExtname == .gql",
           "group": "navigation"
         }
       ],
