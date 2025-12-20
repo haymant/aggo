@@ -6,7 +6,7 @@ export type GraphqlAnalysis = {
   types: Array<{
     name: string;
     kind: 'object' | 'input' | 'interface' | 'enum' | 'union' | 'scalar' | 'other';
-    fields: Array<{ name: string; type: string }>;
+    fields: Array<{ name: string; type: string; args?: Array<{ name: string; type: string }> }>;
   }>;
   relations: Array<{ fromType: string; fromField: string; toType: string }>;
   layout?: Record<
@@ -119,13 +119,22 @@ export function analyzeSdl(sdl: string): GraphqlAnalysis {
       if (!('name' in def) || !def.name?.value) continue;
       const kind = typeKindFromDefinition(def);
 
-      const fields: Array<{ name: string; type: string }> = [];
+      const fields: Array<{ name: string; type: string; args?: Array<{ name: string; type: string }> }> = [];
       const defFields = (def as any).fields;
       if (Array.isArray(defFields)) {
         for (const f of defFields) {
+          const argsAst = Array.isArray((f as any).arguments) ? (f as any).arguments : [];
+          const args = argsAst
+            .map((a: any) => ({
+              name: a?.name?.value ?? '',
+              type: renderTypeRef(a?.type),
+            }))
+            .filter((a: any) => a.name && a.type);
+
           fields.push({
             name: f.name?.value ?? '',
             type: renderTypeRef(f.type),
+            args: args.length ? args : undefined,
           });
         }
       }
@@ -138,10 +147,20 @@ export function analyzeSdl(sdl: string): GraphqlAnalysis {
     for (const t of types) {
       if (!(t.kind === 'object' || t.kind === 'input' || t.kind === 'interface')) continue;
       for (const f of t.fields) {
-        const target = baseNamedType(f.type);
-        if (!target || target === t.name) continue;
-        if (!typeMap.has(target)) continue;
-        relations.push({ fromType: t.name, fromField: f.name, toType: target });
+        // Return type relation
+        const returnTarget = baseNamedType(f.type);
+        if (returnTarget && returnTarget !== t.name && typeMap.has(returnTarget)) {
+          relations.push({ fromType: t.name, fromField: f.name, toType: returnTarget });
+        }
+
+        // Argument type relations (e.g. Mutation.createOrder(input: CreateOrderInput!): ...)
+        for (const a of f.args ?? []) {
+          const argTarget = baseNamedType(a.type);
+          if (!argTarget || argTarget === t.name) continue;
+          if (!typeMap.has(argTarget)) continue;
+          // Use a stable label so edges are distinct vs return-type edges.
+          relations.push({ fromType: t.name, fromField: `${f.name}.${a.name}`, toType: argTarget });
+        }
       }
     }
 

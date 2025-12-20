@@ -51,6 +51,43 @@ function applyTheme(theme: 'light' | 'dark') {
 }
 
 type GraphqlType = GraphqlAnalysis['types'][number];
+function kindToTextClass(kind: GraphqlType['kind']): string {
+  switch (kind) {
+    case 'object':
+      return 'text-sky-300';
+    case 'input':
+      return 'text-amber-300';
+    case 'interface':
+      return 'text-violet-300';
+    case 'enum':
+      return 'text-emerald-300';
+    case 'union':
+      return 'text-fuchsia-300';
+    case 'scalar':
+      return 'text-slate-300';
+    default:
+      return 'text-white/70';
+  }
+}
+
+function kindLabel(kind: GraphqlType['kind']): string {
+  switch (kind) {
+    case 'object':
+      return 'type';
+    case 'input':
+      return 'input';
+    case 'interface':
+      return 'interface';
+    case 'enum':
+      return 'enum';
+    case 'union':
+      return 'union';
+    case 'scalar':
+      return 'scalar';
+    default:
+      return 'type';
+  }
+}
 
 function nodeHeightForType(fieldsCount: number): number {
   const rows = Math.min(12, Math.max(0, fieldsCount));
@@ -139,12 +176,13 @@ const DRAG_MIME = 'application/x-aggo-graphql-field';
 
 const GraphqlTypeCard: React.FC<{
   t: GraphqlType;
+  typeKindByName: Record<string, GraphqlType['kind']>;
   selectedType: string;
   selectedField: string;
   onSelectType: (typeName: string) => void;
   onSelectField: (typeName: string, fieldName: string, fieldType: string) => void;
   onReorderField: (typeName: string, fromField: string, toField: string) => void;
-}> = ({ t, selectedType, selectedField, onSelectType, onSelectField, onReorderField }) => {
+}> = ({ t, typeKindByName, selectedType, selectedField, onSelectType, onSelectField, onReorderField }) => {
   const isSelected = selectedType && t.name === selectedType;
   const titleStyle = (() => {
     // Minimal font-style differences by kind (no new fonts).
@@ -154,6 +192,7 @@ const GraphqlTypeCard: React.FC<{
   })();
   return (
     <div className="text-xs leading-tight">
+      <div className="flex items-center justify-between gap-2">
       <button
         type="button"
         onClick={(e) => {
@@ -176,9 +215,43 @@ const GraphqlTypeCard: React.FC<{
         {t.name}
       </button>
 
+        <span className={['text-[11px]', kindToTextClass(t.kind)].join(' ')}>{kindLabel(t.kind)}</span>
+      </div>
+
       <div className="opacity-90">
         {t.fields.slice(0, 12).map((f) => {
           const fieldSelected = isSelected && selectedField && f.name === selectedField;
+
+          const typeTextClass = (() => {
+            const named = f.type.replace(/[\[\]!\s]/g, '');
+            const k = typeKindByName[named];
+            return k ? kindToTextClass(k) : 'text-white/80';
+          })();
+
+          const args = Array.isArray((f as any).args) ? ((f as any).args as Array<{ name: string; type: string }>) : [];
+          const renderArgs = () => {
+            if (!args.length) return null;
+            return (
+              <span className="opacity-80">
+                (
+                {args.map((a, idx) => {
+                  const named = a.type.replace(/[\[\]!\s]/g, '');
+                  const k = typeKindByName[named];
+                  const cls = k ? kindToTextClass(k) : 'text-white/80';
+                  return (
+                    <span key={a.name}>
+                      {idx ? <span className="opacity-60">, </span> : null}
+                      <span className="opacity-90">{a.name}</span>
+                      <span className="opacity-60">: </span>
+                      <span className={cls}>{a.type}</span>
+                    </span>
+                  );
+                })}
+                )
+              </span>
+            );
+          };
+
           return (
             <div
               key={f.name}
@@ -227,8 +300,9 @@ const GraphqlTypeCard: React.FC<{
                 title="Select field"
               >
                 <span className="opacity-90">{f.name}</span>
+                {renderArgs()}
                 <span className="opacity-70">: </span>
-                <span className="opacity-80">{f.type}</span>
+                <span className={typeTextClass}>{f.type}</span>
               </button>
             </div>
           );
@@ -439,6 +513,9 @@ const App: React.FC = () => {
 
   // Keep ReactFlow nodes/edges in sync with the latest analysis, but preserve user-dragged positions.
   React.useEffect(() => {
+    const typeKindByName: Record<string, GraphqlType['kind']> = {};
+    for (const t of analysis.types) typeKindByName[t.name] = t.kind;
+
     const interesting = analysis.types
       .filter((t) => t.kind === 'object' || t.kind === 'input' || t.kind === 'interface')
       .slice(0, 80);
@@ -458,6 +535,7 @@ const App: React.FC = () => {
       const label = (
         <GraphqlTypeCard
           t={t}
+          typeKindByName={typeKindByName}
           selectedType={selectedType}
           selectedField={selectedField}
           onSelectType={onSelectType}
