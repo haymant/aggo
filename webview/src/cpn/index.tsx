@@ -26,7 +26,7 @@ import { PlaceNode } from "./components/PlaceNode";
 import { TransitionNode } from "./components/TransitionNode";
 import { LabeledEdge } from "./components/LabeledEdge";
 import { CanvasControls } from "./components/CanvasControls";
-import { computePetriLayout } from "./utils/auto-layout";
+import { computePetriLayoutGraph } from "./utils/auto-layout";
 
 declare const acquireVsCodeApi: any;
 const vscode = typeof acquireVsCodeApi !== "undefined" ? acquireVsCodeApi() : null;
@@ -148,14 +148,19 @@ function CPNEditor() {
     });
   }, [screenToFlowPosition, setNodes, edges, sendUpdate]);
 
-  const onAutoLayout = useCallback(() => {
-      setNodes((curr) => {
-          const layouted = computePetriLayout(curr, edges, { horizontalGap: 260, verticalGap: 120, startX: 120, startY: 80 });
-          sendUpdate(layouted, edges);
-          return layouted;
+  const onAutoLayout = useCallback(async () => {
+      const { nodes: layoutedNodes, edges: layoutedEdges } = await computePetriLayoutGraph(nodes, edges, {
+        direction: 'DOWN',
+        horizontalGap: 220,
+        verticalGap: 140,
+        startX: 120,
+        startY: 80,
       });
+      setNodes(layoutedNodes);
+      setEdges(layoutedEdges);
+      sendUpdate(layoutedNodes, layoutedEdges);
       setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 30);
-  }, [edges, fitView, setNodes, sendUpdate]);
+  }, [edges, fitView, nodes, sendUpdate, setEdges, setNodes]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -304,6 +309,7 @@ function CPNEditor() {
         onSelectionChange={onSelectionChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        autoPanOnNodeDrag={false}
         fitView
       >
         <Background />

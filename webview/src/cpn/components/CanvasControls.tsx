@@ -8,8 +8,8 @@ interface CanvasControlsProps {
   interactive?: boolean;
   setInteractive?: React.Dispatch<React.SetStateAction<boolean>>;
   openProperties?: () => void;
-  addPlace: () => void;
-  addTransition: () => void;
+  addPlace?: () => void;
+  addTransition?: () => void;
   onAutoLayout: () => void;
   zoomIn?: (opts?: any) => void;
   zoomOut?: (opts?: any) => void;
@@ -71,12 +71,16 @@ export function CanvasControls({
           </ControlButton>
         )}
         
-        <ControlButton onClick={addPlace} title="Add Place">
-          <CirclePlus className="h-4 w-4" aria-hidden />
-        </ControlButton>
-        <ControlButton onClick={addTransition} title="Add Transition">
-          <SquarePlus className="h-4 w-4" aria-hidden />
-        </ControlButton>
+        {addPlace && (
+          <ControlButton onClick={addPlace} title="Add Place">
+            <CirclePlus className="h-4 w-4" aria-hidden />
+          </ControlButton>
+        )}
+        {addTransition && (
+          <ControlButton onClick={addTransition} title="Add Transition">
+            <SquarePlus className="h-4 w-4" aria-hidden />
+          </ControlButton>
+        )}
         <ControlButton onClick={onAutoLayout} title="Auto layout">
           <WandSparkles className="h-4 w-4" aria-hidden />
         </ControlButton>

@@ -9,6 +9,7 @@ import { buildChromeLaunchConfig } from '../utils/debugConfig';
 import { AGGO_GENERATED_TAG, isAggoGeneratedFile, routeDirForPageId } from '../utils/nextjsCodegen';
 import { extractLocalhostBaseUrl } from '../utils/runtimeBaseUrl';
 import { computeSchemaPathLiteral, upsertResolverRegion } from '../utils/graphqlResolverScaffold';
+import { pnmlYamlToCpnGraph, applyLayoutToPnmlYaml } from '../utils/pnmlGraph';
 
 function testPageIdFromFsPath() {
   const root = '/ws';
@@ -92,6 +93,73 @@ function testGraphqlSchemaPathLiteral() {
   assert.equal(lit, './src/schema.graphql');
 }
 
+function testPnmlYamlToCpnGraphBasic() {
+  const yaml = [
+    'pnml:',
+    '  net:',
+    '    - id: demo',
+    '      type: https://evolve.dev/pnml/hlpn/evolve-2009',
+    '      page:',
+    '        - id: page1',
+    '          place:',
+    '            - id: p1',
+    '              name: { text: Start }',
+    '          transition:',
+    '            - id: t1',
+    '              name: { text: DoThing }',
+    '              evolve: { kind: manual }',
+    '          arc:',
+    '            - id: a1',
+    '              source: p1',
+    '              target: t1',
+  ].join('\n');
+
+  const graph = pnmlYamlToCpnGraph(yaml);
+  assert.ok(Array.isArray(graph.nodes));
+  assert.ok(Array.isArray(graph.edges));
+  assert.equal(graph.nodes.length, 2);
+  assert.equal(graph.edges.length, 1);
+  const p1 = graph.nodes.find(n => n.id === 'p1');
+  const t1 = graph.nodes.find(n => n.id === 't1');
+  assert.ok(p1);
+  assert.ok(t1);
+  assert.equal((t1 as any).data?.tType, 'manual');
+}
+
+function testApplyLayoutToPnmlYamlAddsGraphicsPositions() {
+  // No graphics in input.
+  const yaml = [
+    'pnml:',
+    '  net:',
+    '    - id: demo',
+    '      type: https://evolve.dev/pnml/hlpn/evolve-2009',
+    '      page:',
+    '        - id: page1',
+    '          place:',
+    '            - id: p1',
+    '              name: { text: Start }',
+    '          transition:',
+    '            - id: t1',
+    '              name: { text: DoThing }',
+  ].join('\n');
+
+  const next = applyLayoutToPnmlYaml(yaml, [
+    { id: 'p1', type: 'place', position: { x: 10, y: 20 } },
+    { id: 't1', type: 'transition', position: { x: 30, y: 40 } },
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const jsyaml = require('js-yaml');
+  const parsed = jsyaml.load(next);
+  const page = parsed?.pnml?.net?.[0]?.page?.[0];
+  const p1 = page?.place?.find((p: any) => p?.id === 'p1');
+  const t1 = page?.transition?.find((t: any) => t?.id === 't1');
+  assert.equal(p1.graphics.position.x, 10);
+  assert.equal(p1.graphics.position.y, 20);
+  assert.equal(t1.graphics.position.x, 30);
+  assert.equal(t1.graphics.position.y, 40);
+}
+
 function main() {
   const tests: Array<[string, () => void]> = [
     ['pageIdFromFsPath', testPageIdFromFsPath],
@@ -103,7 +171,9 @@ function main() {
     ['runtimeBaseUrlExtraction', testRuntimeBaseUrlExtraction],
     ['graphqlResolverScaffoldCreate', testGraphqlResolverScaffoldCreate],
     ['graphqlResolverScaffoldUpsertRegionOnly', testGraphqlResolverScaffoldUpsertRegionOnly],
-    ['graphqlSchemaPathLiteral', testGraphqlSchemaPathLiteral]
+    ['graphqlSchemaPathLiteral', testGraphqlSchemaPathLiteral],
+    ['pnmlYamlToCpnGraphBasic', testPnmlYamlToCpnGraphBasic],
+    ['applyLayoutToPnmlYamlAddsGraphicsPositions', testApplyLayoutToPnmlYamlAddsGraphicsPositions]
   ];
 
   let failed = 0;

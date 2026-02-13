@@ -7,6 +7,7 @@ import { AggoDataSourceEditorProvider } from './editors/AggoDataSourceEditorProv
 import { AggoMcpEditorProvider } from './editors/AggoMcpEditorProvider';
 import { AggoColorEditorProvider } from './editors/AggoColorEditorProvider';
 import { AggoCPNEditorProvider } from './editors/AggoCPNEditorProvider';
+import { AggoPNMLEditorProvider } from './editors/AggoPNMLEditorProvider';
 import { AggoGraphqlEditorProvider } from './editors/AggoGraphqlEditorProvider';
 import { AggoComponentLibraryProvider } from './views/AggoComponentLibraryProvider';
 import { AggoPropertyViewProvider } from './views/AggoPropertyViewProvider';
@@ -93,6 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
     { viewType: 'aggo.dataSourceEditor', ext: '.ds', title: 'Aggo DataSource Editor' },
     { viewType: 'aggo.schemaEditor', ext: '.schema', title: 'Aggo Schema Editor' },
     { viewType: 'aggo.cpnEditor', ext: '.cpn', title: 'Aggo CPN Editor' },
+    { viewType: 'aggo.pnmlEditor', ext: '.pnml.yaml', title: 'Aggo PNML Editor' },
     { viewType: 'aggo.mcpEditor', ext: '.mcp', title: 'Aggo MCP Editor' },
     { viewType: 'aggo.colorEditor', ext: '.color', title: 'Aggo Color Editor' },
     { viewType: 'aggo.graphqlEditor', ext: '.graphql', title: 'Aggo GraphQL Editor' }
@@ -103,6 +105,7 @@ export function activate(context: vscode.ExtensionContext) {
     'aggo.dataSourceEditor': 'aggo.openAggoDataSourceEditor',
     'aggo.schemaEditor': 'aggo.openAggoSchemaEditor',
     'aggo.cpnEditor': 'aggo.openAggoCPNEditor',
+    'aggo.pnmlEditor': 'aggo.openAggoPNMLEditor',
     'aggo.mcpEditor': 'aggo.openAggoMCPEditor',
     'aggo.colorEditor': 'aggo.openAggoColorEditor',
     'aggo.graphqlEditor': 'aggo.openAggoGraphqlEditor'
@@ -113,6 +116,9 @@ export function activate(context: vscode.ExtensionContext) {
     switch (vt.viewType) {
       case 'aggo.cpnEditor':
         provider = new AggoCPNEditorProvider(context.extensionUri, vt.title, isDev);
+        break;
+      case 'aggo.pnmlEditor':
+        provider = new AggoPNMLEditorProvider(context.extensionUri, vt.title, isDev);
         break;
       case 'aggo.schemaEditor':
         provider = new AggoSchemaEditorProvider(context.extensionUri, vt.viewType, vt.title, isDev);

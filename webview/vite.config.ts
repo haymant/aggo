@@ -22,6 +22,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         cpn: path.resolve(__dirname, 'cpn.html'),
+        pnml: path.resolve(__dirname, 'pnml.html'),
         graphql: path.resolve(__dirname, 'graphql.html')
       },
       output: {

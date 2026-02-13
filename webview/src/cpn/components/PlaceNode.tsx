@@ -17,8 +17,8 @@ const SquareIcon = ({ className, size, style }: any) => (
 );
 
 export function PlaceNode({ id, data, selected }: NodeProps) {
-  const [hoverLeft, setHoverLeft] = useState(false);
-  const [hoverRight, setHoverRight] = useState(false);
+  const [hoverTop, setHoverTop] = useState(false);
+  const [hoverBottom, setHoverBottom] = useState(false);
   const place = data as any;
 
   const openTokens = () => {
@@ -71,29 +71,29 @@ export function PlaceNode({ id, data, selected }: NodeProps) {
 
         <Handle
           type="target"
-          position={Position.Left}
+          position={Position.Top}
           className="!bg-neutral-400 rounded-full border border-white cursor-crosshair"
-          onMouseEnter={() => setHoverLeft(true)}
-          onMouseLeave={() => setHoverLeft(false)}
+          onMouseEnter={() => setHoverTop(true)}
+          onMouseLeave={() => setHoverTop(false)}
           style={{
-            width: hoverLeft ? 14 : 8,
-            height: hoverLeft ? 14 : 8,
+            width: hoverTop ? 14 : 8,
+            height: hoverTop ? 14 : 8,
             transition: "width 120ms ease, height 120ms ease, box-shadow 120ms ease",
-            boxShadow: hoverLeft ? "0 0 0 3px rgba(16,185,129,0.25)" : "none",
+            boxShadow: hoverTop ? "0 0 0 3px rgba(16,185,129,0.25)" : "none",
             zIndex:3
           }}
         />
         <Handle
           type="source"
-          position={Position.Right}
+          position={Position.Bottom}
           className="!bg-neutral-400 rounded-full border border-white cursor-crosshair"
-          onMouseEnter={() => setHoverRight(true)}
-          onMouseLeave={() => setHoverRight(false)}
+          onMouseEnter={() => setHoverBottom(true)}
+          onMouseLeave={() => setHoverBottom(false)}
           style={{
-            width: hoverRight ? 14 : 8,
-            height: hoverRight ? 14 : 8,
+            width: hoverBottom ? 14 : 8,
+            height: hoverBottom ? 14 : 8,
             transition: "width 120ms ease, height 120ms ease, box-shadow 120ms ease",
-            boxShadow: hoverRight ? "0 0 0 3px rgba(16,185,129,0.25)" : "none",
+            boxShadow: hoverBottom ? "0 0 0 3px rgba(16,185,129,0.25)" : "none",
             zIndex:3
           }}
         />

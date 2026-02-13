@@ -6,6 +6,40 @@ import {
   getBezierPath,
 } from "@xyflow/react";
 
+type Pt = { x: number; y: number };
+
+function isFinitePoint(p: any): p is Pt {
+  return p && Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+
+function polylinePath(points: Pt[]): string {
+  const [first, ...rest] = points;
+  return `M ${first.x} ${first.y}` + rest.map((p) => ` L ${p.x} ${p.y}`).join('');
+}
+
+function midpointAlongPolyline(points: Pt[]): Pt {
+  if (points.length === 1) return points[0];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    total += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  const half = total / 2;
+  let acc = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (acc + seg >= half) {
+      const t = seg === 0 ? 0 : (half - acc) / seg;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    acc += seg;
+  }
+  return points[Math.max(0, points.length - 1)];
+}
+
 // Simple Badge component replacement
 const Badge = ({ children, className, variant }: any) => (
   <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${className} ${variant === 'outline' ? 'aggo-border' : 'aggo-badge'}`}>
@@ -29,16 +63,34 @@ export function LabeledEdge({
   data,
   selected,
 }: EdgeProps) {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const edgeData = data as any;
+  const maybePoints: any[] = Array.isArray(edgeData?.points) ? edgeData.points : [];
+  const routedPoints: Pt[] = maybePoints.filter(isFinitePoint);
+
+  const { edgePath, labelX, labelY } = React.useMemo(() => {
+    if (routedPoints.length >= 2) {
+      const mid = midpointAlongPolyline(routedPoints);
+      return { edgePath: polylinePath(routedPoints), labelX: mid.x, labelY: mid.y };
+    }
+    const [p, lx, ly] = getBezierPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
+    });
+    return { edgePath: p, labelX: lx, labelY: ly };
+  }, [
+    routedPoints,
     sourceX,
     sourceY,
     sourcePosition,
     targetX,
     targetY,
     targetPosition,
-  });
+  ]);
 
-  const edgeData = data as any;
   const expression = edgeData?.expression || "";
   const trimmed = expression.trim();
   const hasLabel = trimmed.length > 0;

@@ -3,7 +3,7 @@
   "displayName": "Aggo Builder",
   "icon": "media/aggo.png",
   "description": "VS Code extension that builds Aggo Applications with ease.",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "publisher": "lizhao",
   "repository": {
     "type": "git",
@@ -58,7 +58,9 @@
     "node_modules/fast-uri/**",
     "node_modules/json-schema-traverse/**",
     "node_modules/require-from-string/**",
-    "node_modules/jsonc-parser/**"
+    "node_modules/jsonc-parser/**",
+    "node_modules/js-yaml/**",
+    "node_modules/argparse/**"
   ],
   "assets": [
     {
@@ -71,13 +73,14 @@
     }
   ],
   "dependencies": {
-    "@aggo/core": "workspace:*",
+    "@aggo/core": "file:packages/core",
     "@radix-ui/react-tabs": "^1.0.0",
     "@xyflow/react": "^12.9.3",
     "aggo-schema-editor": "^0.2.4",
     "ajv": "8.17.1",
     "elkjs": "^0.11.0",
     "graphql": "^16.11.0",
+    "js-yaml": "^4.1.0",
     "jsonc-parser": "^3.0.0",
     "lucide-react": "^0.556.0",
     "react": "^19.0.0",
@@ -95,7 +98,9 @@
         "*.schema": "json",
         "*.cpn": "json",
         "*.mcp": "json",
-        "*.color": "json"
+        "*.color": "json",
+        "*.evolve.yaml": "yaml",
+        "*.pnml.yaml": "yaml"
       }
     },
     "configuration": {
@@ -165,6 +170,19 @@
         "priority": "option"
       },
       {
+        "viewType": "aggo.pnmlEditor",
+        "displayName": "Aggo PNML Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.evolve.yaml"
+          },
+          {
+            "filenamePattern": "*.pnml.yaml"
+          }
+        ],
+        "priority": "option"
+      },
+      {
         "viewType": "aggo.mcpEditor",
         "displayName": "Aggo MCP Editor",
         "selector": [
@@ -214,6 +232,10 @@
       {
         "command": "aggo.openAggoCPNEditor",
         "title": "Open with Aggo CPN Editor"
+      },
+      {
+        "command": "aggo.openAggoPNMLEditor",
+        "title": "Open with Aggo PNML Editor"
       },
       {
         "command": "aggo.openAggoMCPEditor",
@@ -308,6 +330,11 @@
         {
           "command": "aggo.openAggoCPNEditor",
           "when": "resourceExtname == .cpn",
+          "group": "navigation"
+        },
+        {
+          "command": "aggo.openAggoPNMLEditor",
+          "when": "resourceFilename =~ /\\.(?:evolve|pnml)\\.yaml$/",
           "group": "navigation"
         },
         {
