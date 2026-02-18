@@ -10,6 +10,9 @@ import { AGGO_GENERATED_TAG, isAggoGeneratedFile, routeDirForPageId } from '../u
 import { extractLocalhostBaseUrl } from '../utils/runtimeBaseUrl';
 import { computeSchemaPathLiteral, upsertResolverRegion } from '../utils/graphqlResolverScaffold';
 import { pnmlYamlToCpnGraph, applyLayoutToPnmlYaml } from '../utils/pnmlGraph';
+import { OpenAiCompatProxyServer } from '../llm/openaiCompatProxyServer';
+import { buildChatCompletionResponse, toLmMessages, toOpenAiToolCalls } from '../llm/openaiProxyMapper';
+import { LmProxyHost, ModelInfo, OpenAiChatCompletionRequest, ProxyChatResult, ProxyStreamEvent } from '../llm/openaiProxyTypes';
 
 function testPageIdFromFsPath() {
   const root = '/ws';
@@ -160,8 +163,387 @@ function testApplyLayoutToPnmlYamlAddsGraphicsPositions() {
   assert.equal(t1.graphics.position.y, 40);
 }
 
-function main() {
-  const tests: Array<[string, () => void]> = [
+function testProxyMapperMessageMapping() {
+  const mapped = toLmMessages([
+    { role: 'system', content: 'rules' },
+    { role: 'user', content: 'hello' },
+    { role: 'tool', content: '{"ok":true}', tool_call_id: 'abc' }
+  ]);
+  assert.equal(mapped.length, 3);
+  assert.equal(mapped[0].role, 'system');
+  assert.equal(mapped[1].content, 'hello');
+  assert.ok(mapped[2].content.includes('tool_call_id=abc'));
+}
+
+function testProxyMapperToolCalls() {
+  const mapped = toOpenAiToolCalls([
+    { id: 't1', name: 'readFile', arguments: '{"path":"a.ts"}' }
+  ]);
+  assert.equal(mapped.length, 1);
+  assert.equal(mapped[0].id, 't1');
+  assert.equal(mapped[0].function.name, 'readFile');
+
+  const response = buildChatCompletionResponse({
+    id: 'chatcmpl-1',
+    model: 'gpt-4o',
+    content: '',
+    toolCalls: [{ id: 't1', name: 'readFile', arguments: '{}' }]
+  });
+  assert.equal(response.choices[0].finish_reason, 'tool_calls');
+  assert.ok(Array.isArray((response.choices[0].message as any).tool_calls));
+}
+
+class FakeLmHost implements LmProxyHost {
+  public models: ModelInfo[];
+  public throwOnComplete: Error | undefined;
+
+  constructor(models: ModelInfo[] = [{ id: 'gpt-4o', object: 'model', owned_by: 'copilot' }]) {
+    this.models = models;
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return this.models;
+  }
+
+  async complete(request: OpenAiChatCompletionRequest): Promise<ProxyChatResult> {
+    if (this.throwOnComplete) throw this.throwOnComplete;
+    const model = request.model ?? this.models[0]?.id ?? 'gpt-4o';
+
+    if (request.function_call && (request as any).function_call.name) {
+      const name = (request as any).function_call.name;
+      return {
+        model,
+        content: '',
+        toolCalls: [
+          { id: 'call_1', name, arguments: JSON.stringify({ path: 'README.md', url: 'https://example.com' }) }
+        ],
+        finishReason: 'tool_calls'
+      };
+    }
+
+    if (request.tools?.length) {
+      return {
+        model,
+        content: '',
+        toolCalls: [
+          {
+            id: 'call_1',
+            name: request.tools[0].function.name,
+            arguments: JSON.stringify({ path: 'README.md' })
+          }
+        ],
+        finishReason: 'tool_calls'
+      };
+    }
+
+    const userText = request.messages?.filter((m) => m.role === 'user').map((m) => m.content ?? '').join(' ') ?? '';
+    return {
+      model,
+      content: `echo:${userText}`,
+      finishReason: 'stop'
+    };
+  }
+
+  async *streamComplete(request: OpenAiChatCompletionRequest): AsyncIterable<ProxyStreamEvent> {
+    const model = request.model ?? this.models[0]?.id ?? 'gpt-4o';
+    yield { delta: `model:${model}|` };
+    yield { delta: 'chunk-1|' };
+    yield { delta: 'chunk-2', finishReason: 'stop' };
+  }
+
+  // Test-only: simulate host-registered LM tools (e.g. `web` / `search`)
+  async listTools(): Promise<any[]> {
+    return [
+      {
+        type: 'function',
+        function: {
+          name: 'web',
+          description: 'Fetch or search a public web page',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string' },
+              query: { type: 'string' }
+            },
+            required: ['url']
+          }
+        }
+      }
+    ];
+  }
+
+  // Test-only: execute a named tool. Support `readFile` for tests.
+  async executeTool(name: string, args: any): Promise<any> {
+    if (name === 'readFile') {
+      const p = String((args && args.path) || 'README.md');
+      const fs = require('fs');
+      const text = fs.readFileSync(p, 'utf8');
+      return { status: 200, body: text };
+    }
+    throw new Error(`tool not implemented: ${name}`);
+  }
+}
+
+async function startTestProxy(apiKeys: string[] = ['secret']) {
+  const host = new FakeLmHost();
+  const server = new OpenAiCompatProxyServer({
+    port: 0,
+    apiKeys,
+    lmHost: host,
+    logger: console
+  });
+  const port = await server.start();
+  return { server, host, port };
+}
+
+async function testProxyAuthInvalidKey() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/models`, {
+      headers: { Authorization: 'Bearer wrong' }
+    });
+    assert.equal(res.status, 401);
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyModelList() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/models`, {
+      headers: { Authorization: 'Bearer secret' }
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json() as any;
+    assert.equal(json.object, 'list');
+    assert.equal(json.data[0].id, 'gpt-4o');
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyToolsEndpoint() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/tools`, {
+      headers: { Authorization: 'Bearer secret' }
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json() as any;
+    assert.ok(Array.isArray(json.tools));
+    const names = json.tools.map((t: any) => t?.function?.name).filter(Boolean);
+    // host-provided tool (FakeLmHost.listTools). proxy no longer advertises `fetchWebPage`.
+    assert.ok(names.includes('web'));
+    assert.ok(!names.includes('fetchWebPage'));
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyExecuteToolEndpoint() {
+  const { server, port, host } = await startTestProxy(['secret']);
+  try {
+    // 1) Simulate a chat completion that returns a tool call (readFile)
+    const callRes = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'use a tool' }],
+        tools: [
+          { type: 'function', function: { name: 'readFile', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }
+        ]
+      })
+    });
+    assert.equal(callRes.status, 200);
+    const callJson = await callRes.json() as any;
+    const toolCall = (callJson.choices[0].message as any).tool_calls[0];
+    const args = JSON.parse(toolCall.function.arguments);
+
+    // 2) Ask proxy to execute the tool call on behalf of the client
+    const execRes = await fetch(`http://127.0.0.1:${port}/v1/tool_calls`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: toolCall.id, name: toolCall.function.name, arguments: args })
+    });
+    assert.equal(execRes.status, 200);
+    const execJson = await execRes.json() as any;
+    assert.ok(execJson.result);
+    assert.ok(typeof execJson.result.body === 'string');
+    assert.ok(execJson.result.body.includes('#'));
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyErrorModelUnavailable() {
+  const host = new FakeLmHost([{ id: 'gpt-4o' }]);
+  host.throwOnComplete = new Error('Model not found: nope');
+  const server = new OpenAiCompatProxyServer({
+    port: 0,
+    apiKeys: ['secret'],
+    lmHost: host,
+    logger: console
+  });
+  const port = await server.start();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'nope',
+        messages: [{ role: 'user', content: 'hello' }]
+      })
+    });
+    assert.equal(res.status, 404);
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyBasicChat() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'hi there' }]
+      })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json() as any;
+    assert.equal(json.choices[0].message.content, 'echo:hi there');
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyStreaming() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        stream: true,
+        messages: [{ role: 'user', content: 'stream' }]
+      })
+    });
+    assert.equal(res.status, 200);
+
+    const text = await res.text();
+    assert.ok(text.includes('chat.completion.chunk'));
+    assert.ok(text.includes('[DONE]'));
+    assert.ok(text.includes('chunk-1|'));
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyToolFlow() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'use a tool' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'readFile',
+              parameters: {
+                type: 'object',
+                properties: { path: { type: 'string' } }
+              }
+            }
+          }
+        ]
+      })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json() as any;
+    assert.equal(json.choices[0].finish_reason, 'tool_calls');
+    assert.equal(json.choices[0].message.tool_calls[0].function.name, 'readFile');
+
+    // Now test explicit function_call hint causes LM (FakeLmHost) to return a tool call too
+    const res2 = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        function_call: { name: 'readFile' },
+        messages: [{ role: 'user', content: 'please read README' }]
+      })
+    });
+    assert.equal(res2.status, 200);
+    const json2 = await res2.json() as any;
+    assert.equal(json2.choices[0].finish_reason, 'tool_calls');
+    assert.equal(json2.choices[0].message.tool_calls[0].function.name, 'readFile');
+  } finally {
+    await server.stop();
+  }
+}
+
+async function testProxyInvalidToolSchema() {
+  const { server, port } = await startTestProxy(['secret']);
+  try {
+    // invalid: function.name must be a string
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'try invalid tool' }],
+        tools: [ { type: 'function', function: { name: 123 } } ]
+      })
+    });
+    assert.equal(res.status, 400);
+    const json = await res.json() as any;
+    assert.ok(json.error.message.includes('function.name'));
+  } finally {
+    await server.stop();
+  }
+}
+
+function testOpenAiToolsToLmTools() {
+  const openAiTool = {
+    type: 'function',
+    function: {
+      name: 'fetchWebPage',
+      description: 'Fetch HTML',
+      parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }
+    }
+  };
+  const mapper = require('../llm/openaiProxyMapper').openAiToolsToLmTools;
+  const mapped = mapper([openAiTool]);
+  assert.ok(mapped && mapped.length === 1);
+  assert.equal(mapped[0].name, 'fetchWebPage');
+  assert.equal(mapped[0].description, 'Fetch HTML');
+  assert.ok(mapped[0].inputSchema && mapped[0].inputSchema.properties);
+}
+
+async function main() {
+  const tests: Array<[string, () => void | Promise<void>]> = [
     ['pageIdFromFsPath', testPageIdFromFsPath],
     ['pageUrlFromId', testPageUrlFromId],
     ['detectPackageManager', testDetectPackageManager],
@@ -173,13 +555,23 @@ function main() {
     ['graphqlResolverScaffoldUpsertRegionOnly', testGraphqlResolverScaffoldUpsertRegionOnly],
     ['graphqlSchemaPathLiteral', testGraphqlSchemaPathLiteral],
     ['pnmlYamlToCpnGraphBasic', testPnmlYamlToCpnGraphBasic],
-    ['applyLayoutToPnmlYamlAddsGraphicsPositions', testApplyLayoutToPnmlYamlAddsGraphicsPositions]
+    ['applyLayoutToPnmlYamlAddsGraphicsPositions', testApplyLayoutToPnmlYamlAddsGraphicsPositions],
+    ['proxyMapperMessageMapping', testProxyMapperMessageMapping],
+    ['proxyMapperToolCalls', testProxyMapperToolCalls],
+    ['proxyAuthInvalidKey', testProxyAuthInvalidKey],
+    ['proxyModelList', testProxyModelList],
+    ['proxyToolsEndpoint', testProxyToolsEndpoint],
+    ['proxyErrorModelUnavailable', testProxyErrorModelUnavailable],
+    ['proxyBasicChat', testProxyBasicChat],
+    ['proxyStreaming', testProxyStreaming],
+    ['proxyToolFlow', testProxyToolFlow],
+    ['proxyExecuteTool', testProxyExecuteToolEndpoint]
   ];
 
   let failed = 0;
   for (const [name, fn] of tests) {
     try {
-      fn();
+      await fn();
       // eslint-disable-next-line no-console
       console.log(`[PASS] ${name}`);
     } catch (err) {
@@ -194,4 +586,4 @@ function main() {
   }
 }
 
-main();
+void main();

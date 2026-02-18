@@ -13,6 +13,10 @@
     "node": ">=20",
     "vscode": "^1.85.0"
   },
+  "activationEvents": [
+    "onCommand:aggo.startLlmProxy",
+    "onCommand:aggo.stopLlmProxy"
+  ],
   "license": "Apache-2.0",
   "categories": [
     "Other"
@@ -125,6 +129,26 @@
           "type": "boolean",
           "default": false,
           "description": "When enabled, the extension generates/removes Next.js routes under the runtime app to match resources/page/**/*.page."
+        },
+        "aggo.llmProxy.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable local OpenAI-compatible proxy endpoint for external agents (Aider) via VS Code LM APIs."
+        },
+        "aggo.llmProxy.port": {
+          "type": "number",
+          "default": 11200,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port used by the local OpenAI-compatible proxy server."
+        },
+        "aggo.llmProxy.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Allowed API keys for Bearer authentication on the local LLM proxy. Empty means no auth required."
         }
       }
     },
@@ -308,6 +332,14 @@
       {
         "command": "aggo.syncGraphqlRuntime",
         "title": "Aggo: Sync GraphQL Runtime Addons"
+      },
+      {
+        "command": "aggo.startLlmProxy",
+        "title": "Aggo: Start LLM Proxy"
+      },
+      {
+        "command": "aggo.stopLlmProxy",
+        "title": "Aggo: Stop LLM Proxy"
       }
     ],
     "menus": {

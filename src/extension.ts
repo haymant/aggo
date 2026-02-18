@@ -24,6 +24,10 @@ import { buildChromeLaunchConfig } from './utils/debugConfig';
 import { detectPackageManager } from './utils/packageManager';
 import { deleteRouteForPageId, ensureRouteForPageId, syncNextjsRoutes } from './utils/nextjsCodegen';
 import { syncGraphqlRuntimeAddons } from './utils/graphqlRuntimeCodegen';
+import { OpenAiCompatProxyServer } from './llm/openaiCompatProxyServer';
+import { VscodeLmProxyHost } from './llm/vscodeLmProxyHost';
+
+let llmProxyServer: OpenAiCompatProxyServer | undefined;
 
 // Broadcast component registry to all registered panels (library, page editor, properties)
 async function broadcastComponentRegistryToPanels() {
@@ -175,6 +179,92 @@ export function activate(context: vscode.ExtensionContext) {
 
   const runtimeManager = new RuntimeServerManager();
   context.subscriptions.push({ dispose: () => { void runtimeManager.stop(); } });
+
+  const resolveLlmProxyConfig = () => {
+    const cfg = vscode.workspace.getConfiguration('aggo.llmProxy');
+    const enabled = cfg.get<boolean>('enabled') ?? false;
+    const port = cfg.get<number>('port') ?? 11200;
+    const apiKeys = cfg.get<string[]>('apiKeys') ?? [];
+    return {
+      enabled,
+      port,
+      apiKeys: apiKeys.filter((k) => typeof k === 'string' && k.trim().length > 0)
+    };
+  };
+
+  const startLlmProxy = async () => {
+    const cfg = resolveLlmProxyConfig();
+    if (!llmProxyServer) {
+      llmProxyServer = new OpenAiCompatProxyServer({
+        port: cfg.port,
+        apiKeys: cfg.apiKeys,
+        lmHost: new VscodeLmProxyHost(),
+        logger: console
+      });
+    } else {
+      llmProxyServer.updateConfig({ port: cfg.port, apiKeys: cfg.apiKeys });
+    }
+
+    const activePort = await llmProxyServer.start();
+    vscode.window.setStatusBarMessage(`Aggo LLM Proxy running on :${activePort}`, 3000);
+  };
+
+  const stopLlmProxy = async () => {
+    if (!llmProxyServer) return;
+    await llmProxyServer.stop();
+    vscode.window.setStatusBarMessage('Aggo LLM Proxy stopped', 3000);
+  };
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.startLlmProxy', async () => {
+    try {
+      await startLlmProxy();
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Aggo LLM Proxy start failed: ${err?.message || String(err)}`);
+    }
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('aggo.stopLlmProxy', async () => {
+    try {
+      await stopLlmProxy();
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Aggo LLM Proxy stop failed: ${err?.message || String(err)}`);
+    }
+  }));
+
+  const proxyConfigWatcher = vscode.workspace.onDidChangeConfiguration(async (event) => {
+    if (!event.affectsConfiguration('aggo.llmProxy')) return;
+
+    const cfg = resolveLlmProxyConfig();
+    try {
+      if (!cfg.enabled) {
+        await stopLlmProxy();
+        return;
+      }
+
+      if (!llmProxyServer) {
+        await startLlmProxy();
+        return;
+      }
+
+      llmProxyServer.updateConfig({ port: cfg.port, apiKeys: cfg.apiKeys });
+      await llmProxyServer.restart();
+      vscode.window.setStatusBarMessage(`Aggo LLM Proxy restarted on :${llmProxyServer.getPort()}`, 3000);
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Aggo LLM Proxy reconfigure failed: ${err?.message || String(err)}`);
+    }
+  });
+  context.subscriptions.push(proxyConfigWatcher);
+
+  const llmProxyCfg = resolveLlmProxyConfig();
+  if (llmProxyCfg.enabled) {
+    void startLlmProxy();
+  }
+
+  context.subscriptions.push({
+    dispose: () => {
+      void stopLlmProxy();
+    }
+  });
 
   let pagesProvider: AggoPagesTreeProvider | undefined;
   if (workspaceRoot) {
@@ -1180,4 +1270,8 @@ export function activate(context: vscode.ExtensionContext) {
   }
 }
 
-export function deactivate() { }
+export function deactivate() {
+  if (llmProxyServer) {
+    void llmProxyServer.stop();
+  }
+}
